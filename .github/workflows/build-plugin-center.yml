@@ -1,0 +1,38 @@
+name: Build Plugin Center
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 36 platform
+        run: sdkmanager "platforms;android-36"
+
+      - name: Build plugin-center APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :plugin-center:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-center-debug
+          path: plugin-center/build/outputs/apk/debug/plugin-center-debug.apk
+          if-no-files-found: error
