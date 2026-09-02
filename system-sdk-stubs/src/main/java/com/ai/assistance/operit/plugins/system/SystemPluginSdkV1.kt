@@ -16,10 +16,23 @@ data class SystemHostPrimitiveDescriptor(
     val callable: Boolean
 )
 
+data class SystemHostPrimitiveAvailability(
+    val id: String,
+    val operation: String?,
+    val known: Boolean,
+    val callable: Boolean,
+    val available: Boolean,
+    val reasonCode: String? = null,
+    val reason: String? = null
+)
+
 interface SystemHostGatewayV1 {
     fun listHostPrimitives(): List<SystemHostPrimitiveDescriptor>
     fun describeHostPrimitive(id: String): SystemHostPrimitiveDescriptor?
+    fun listHostPrimitiveOperations(id: String): List<String>
+    fun availabilityHostPrimitive(id: String, operation: String? = null): SystemHostPrimitiveAvailability
     suspend fun invokeHostPrimitive(id: String, parameters: JSONObject = JSONObject()): JSONObject
+    suspend fun invokeHostPrimitive(id: String, operation: String, parameters: JSONObject = JSONObject()): JSONObject
 }
 
 interface PluginPlatformControlV1 {

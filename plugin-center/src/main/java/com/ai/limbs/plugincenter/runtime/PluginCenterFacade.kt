@@ -24,7 +24,7 @@ internal class PluginControlPlaneFacade(
     fun developerDiscoveryEnabled(): Boolean = host.pluginPlatform.developerDiscoveryEnabled()
 
     fun hostPrimitiveSnapshots(): List<HostPrimitiveSnapshot> =
-        host.pluginPlatform.hostPrimitiveSnapshots().map { item ->
+        host.hostGateway.listHostPrimitives().map { item ->
             HostPrimitiveSnapshot(
                 HostPrimitiveDefinition(
                     item.number, item.id, item.title,
@@ -36,6 +36,16 @@ internal class PluginControlPlaneFacade(
                 item.callable
             )
         }
+
+    fun hostPrimitiveOperations(id: String): List<String> =
+        host.hostGateway.listHostPrimitiveOperations(id)
+
+    fun hostPrimitiveAvailability(id: String, operation: String? = null) =
+        host.hostGateway.availabilityHostPrimitive(id, operation)
+
+    suspend fun invokeHostPrimitive(id: String, operation: String, parameters: JSONObject = JSONObject()): JSONObject =
+        host.hostGateway.invokeHostPrimitive(id, operation, parameters)
+
     suspend fun setDeveloperMode(enabled: Boolean) =
         host.pluginPlatform.setDeveloperMode(enabled)
 
