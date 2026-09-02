@@ -21,12 +21,14 @@ internal class PluginControlPlaneFacade(
     @Volatile private var cachedBackupPolicy = PluginBackupPolicySnapshot(false)
 
     fun developerModeEnabled(): Boolean = host.pluginPlatform.developerModeEnabled()
+    fun developerDiscoveryEnabled(): Boolean = host.pluginPlatform.developerDiscoveryEnabled()
 
     fun hostPrimitiveSnapshots(): List<HostPrimitiveSnapshot> =
         host.pluginPlatform.hostPrimitiveSnapshots().map { item ->
             HostPrimitiveSnapshot(
                 HostPrimitiveDefinition(
                     item.number, item.id, item.title,
+                    item.description, item.boundary,
                     PrimitiveValue(item.maturity), PrimitiveValue(item.exposure),
                     item.requestableScope
                 ),
@@ -36,6 +38,9 @@ internal class PluginControlPlaneFacade(
         }
     suspend fun setDeveloperMode(enabled: Boolean) =
         host.pluginPlatform.setDeveloperMode(enabled)
+
+    suspend fun setDeveloperDiscoveryEnabled(enabled: Boolean) =
+        host.pluginPlatform.setDeveloperDiscoveryEnabled(enabled)
 
     suspend fun setHostPrimitiveAllowed(id: String, allowed: Boolean) {
         host.pluginPlatform.setHostPrimitiveAllowed(id, allowed)
@@ -221,8 +226,12 @@ internal class DynamicNavigationFacade(
         )
     }
 
-    suspend fun rename(surfaceId: String, title: String) {
-        service.call("rename_surface", JSONObject().put("surface_id", surfaceId).put("title", title))
+    suspend fun rename(surfaceId: String, title: String, iconKey: String? = null) {
+        val params = JSONObject()
+            .put("surface_id", surfaceId)
+            .put("title", title)
+        iconKey?.let { params.put("icon_key", it) }
+        service.call("rename_surface", params)
     }
 
     suspend fun delete(surfaceId: String, adminPassword: String) {

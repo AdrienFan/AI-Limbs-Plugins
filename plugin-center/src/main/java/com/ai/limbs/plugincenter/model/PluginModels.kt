@@ -96,6 +96,8 @@ data class HostPrimitiveDefinition(
     val number: Int,
     val id: String,
     val title: String,
+    val description: String,
+    val boundary: String,
     val maturity: PrimitiveValue,
     val exposure: PrimitiveValue,
     val requestableScope: Boolean

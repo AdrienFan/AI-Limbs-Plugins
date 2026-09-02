@@ -7,6 +7,8 @@ data class SystemHostPrimitiveDescriptor(
     val number: Int,
     val id: String,
     val title: String,
+    val description: String,
+    val boundary: String,
     val maturity: String,
     val exposure: String,
     val requestableScope: Boolean,
@@ -22,8 +24,10 @@ interface SystemHostGatewayV1 {
 
 interface PluginPlatformControlV1 {
     fun developerModeEnabled(): Boolean
+    fun developerDiscoveryEnabled(): Boolean
     fun hostPrimitiveSnapshots(): List<SystemHostPrimitiveDescriptor>
     suspend fun setDeveloperMode(enabled: Boolean)
+    suspend fun setDeveloperDiscoveryEnabled(enabled: Boolean)
     suspend fun setHostPrimitiveAllowed(primitiveId: String, allowed: Boolean)
 }
 

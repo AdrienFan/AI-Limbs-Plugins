@@ -12,6 +12,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -20,6 +23,8 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -220,8 +225,9 @@ internal fun PluginAdminSecurityScreen(
     onPolicyChanged: () -> Unit
 ) {
     var developerMode by remember { mutableStateOf(controlPlane.developerModeEnabled()) }
+    var developerDiscovery by remember { mutableStateOf(controlPlane.developerDiscoveryEnabled()) }
     var primitives by remember { mutableStateOf(controlPlane.hostPrimitiveSnapshots()) }
-    var primitivesExpanded by remember { mutableStateOf(true) }
+    var primitivesExpanded by remember { mutableStateOf(false) }
     var primitiveQuery by remember { mutableStateOf("") }
     var surfaces by remember { mutableStateOf(controlPlane.hostSurfaceSnapshots()) }
     var surfacesExpanded by remember { mutableStateOf(false) }
@@ -275,6 +281,7 @@ internal fun PluginAdminSecurityScreen(
                 }
             }.onSuccess { refreshedBackups ->
                 developerMode = controlPlane.developerModeEnabled()
+                developerDiscovery = controlPlane.developerDiscoveryEnabled()
                 primitives = controlPlane.hostPrimitiveSnapshots()
                 surfaces = controlPlane.hostSurfaceSnapshots()
                 backupAutoEnabled = controlPlane.backupPolicySnapshot().enabled
@@ -295,6 +302,7 @@ internal fun PluginAdminSecurityScreen(
         backups = initial.first
         maintenanceStatus = initial.second
         developerMode = controlPlane.developerModeEnabled()
+        developerDiscovery = controlPlane.developerDiscoveryEnabled()
         primitives = controlPlane.hostPrimitiveSnapshots()
         surfaces = controlPlane.hostSurfaceSnapshots()
         val inactivity = controlPlane.inactivityPolicySnapshot()
@@ -314,6 +322,8 @@ internal fun PluginAdminSecurityScreen(
                 "HP-${definition.number.toString().padStart(3, '0')}",
                 definition.id,
                 definition.title,
+                definition.description,
+                definition.boundary,
                 definition.maturity.name,
                 definition.exposure.name
             ).any { it.lowercase().contains(normalizedPrimitiveQuery) }
@@ -606,7 +616,14 @@ internal fun PluginAdminSecurityScreen(
                 onQueryChange = { primitiveQuery = it },
                 expanded = primitivesExpanded,
                 onExpandedChange = { primitivesExpanded = it },
-                searchPlaceholder = "搜索 HP 编号 / host.*@1"
+                searchPlaceholder = "搜索 HP 编号 / host.*@1",
+                headerControl = {
+                    DeveloperDiscoveryButton(
+                        enabled = developerMode && !busy,
+                        discoveryEnabled = developerDiscovery,
+                        onToggle = { runAdminMutation { controlPlane.setDeveloperDiscoveryEnabled(!developerDiscovery) } }
+                    )
+                }
             ) {
                 Text("Stable Host Primitive Catalog", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
@@ -632,7 +649,14 @@ internal fun PluginAdminSecurityScreen(
                 onQueryChange = { surfaceQuery = it },
                 expanded = surfacesExpanded,
                 onExpandedChange = { surfacesExpanded = it },
-                searchPlaceholder = "搜索 Extension Point / Plugin Bus / Policy"
+                searchPlaceholder = "例如 bridge.provider",
+                headerControl = {
+                    DeveloperDiscoveryButton(
+                        enabled = developerMode && !busy,
+                        discoveryEnabled = developerDiscovery,
+                        onToggle = { runAdminMutation { controlPlane.setDeveloperDiscoveryEnabled(!developerDiscovery) } }
+                    )
+                }
             ) {
                 Text("Plugin Surface Policy", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
@@ -729,7 +753,7 @@ internal fun PluginAdminSecurityScreen(
                             runAdminMutation { ids.forEach { controlPlane.restoreBackup(it) } }
                         }
                     ) { Text("恢复所选") }
-                    OutlinedButton(
+                    DangerOutlinedButton(
                         enabled = !busy && selectedBackupIds.isNotEmpty(),
                         onClick = {
                             val ids = selectedBackupIds.toList()
@@ -802,6 +826,20 @@ internal fun PluginAdminSecurityScreen(
 }
 
 @Composable
+private fun DeveloperDiscoveryButton(
+    enabled: Boolean,
+    discoveryEnabled: Boolean,
+    onToggle: () -> Unit
+) {
+    IconButton(enabled = enabled, onClick = onToggle) {
+        Icon(
+            imageVector = if (discoveryEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+            contentDescription = if (discoveryEnabled) "关闭 AI 开发接口发现" else "打开 AI 开发接口发现"
+        )
+    }
+}
+
+@Composable
 private fun HostPrimitiveCards(
     primitives: List<HostPrimitiveSnapshot>,
     busy: Boolean,
@@ -827,6 +865,8 @@ private fun HostPrimitiveCards(
                         fontWeight = FontWeight.Medium
                     )
                     Text(definition.id, style = MaterialTheme.typography.bodySmall)
+                    Text("用途：${definition.description}", style = MaterialTheme.typography.bodySmall)
+                    Text("边界：${definition.boundary}", style = MaterialTheme.typography.bodySmall)
                     Text(
                         "${definition.maturity.name} · ${definition.exposure.name}" +
                             if (definition.requestableScope) " · plugin scope" else "",
@@ -906,7 +946,7 @@ private fun BackupPluginCard(
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = onRestore, enabled = !busy && !backup.installed) { Text("恢复") }
-                OutlinedButton(onClick = onDelete, enabled = !busy) { Text("删除") }
+                DangerOutlinedButton(onClick = onDelete, enabled = !busy) { Text("删除") }
             }
         }
     }

@@ -1,5 +1,6 @@
 package com.ai.limbs.plugincenter.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -24,7 +25,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -209,6 +209,17 @@ fun PluginCenterScreen(
         }
     }
 
+    BackHandler(enabled = showAdminSettings) {
+        showAdminSettings = false
+        scope.launch { refresh() }
+    }
+    BackHandler(enabled = !showAdminSettings && selectedPluginId != null) {
+        selectedPluginId = null
+    }
+    BackHandler(enabled = !showAdminSettings && selectedPluginId == null) {
+        onBack()
+    }
+
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             val selected = snapshots.firstOrNull { it.plugin.pluginId == selectedPluginId }
@@ -249,7 +260,6 @@ fun PluginCenterScreen(
                     snapshots = snapshots,
                     candidates = candidates,
                     busy = busy,
-                    onBack = onBack,
                     onOpenSettings = { requestAdmin(AdminAction.OpenSettings) },
                     onChoose = { choosePlugin() },
                     onClearCandidates = { candidates = emptyList() },
@@ -330,7 +340,7 @@ fun PluginCenterScreen(
             title = { Text("卸载插件") },
             text = { Text("确定卸载 $pluginId？插件长期数据默认保留。") },
             confirmButton = {
-                TextButton(onClick = {
+                DangerTextButton(onClick = {
                     uninstallTargetId = null
                     if (selectedPluginId == pluginId) selectedPluginId = null
                     val systemPlugin = snapshots.firstOrNull { it.plugin.pluginId == pluginId }
@@ -415,7 +425,6 @@ private fun PluginCenterHome(
     snapshots: List<PluginControlSnapshot>,
     candidates: List<PluginImportCandidate>,
     busy: Boolean,
-    onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     onChoose: () -> Unit,
     onInstall: () -> Unit,
@@ -454,9 +463,6 @@ private fun PluginCenterHome(
         ) {
             item(key = "plugin-center-header") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "返回")
-                    }
                     Text(
                         "Plugin Center",
                         modifier = Modifier.weight(1f),
@@ -711,7 +717,7 @@ private fun PluginCard(
                     TextButton(onClick = onEnable) { Text("启用") }
                 }
                 TextButton(onClick = onUpdate) { Text("更新") }
-                TextButton(onClick = onUninstall) { Text("卸载") }
+                DangerTextButton(onClick = onUninstall) { Text("卸载") }
                 TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
             }
         }
@@ -799,7 +805,7 @@ private fun PluginDetail(
                 Button(onClick = onEnable, enabled = !busy) { Text("启用") }
             }
             OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("更新") }
-            OutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
+            DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
             OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
         }
         Text("版本管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)

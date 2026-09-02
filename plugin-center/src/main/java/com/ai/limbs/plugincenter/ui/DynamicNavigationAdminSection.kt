@@ -29,7 +29,11 @@ import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugincenter.runtime.DynamicNavigationFacade
 import com.ai.limbs.plugincenter.runtime.DynamicSurfaceSnapshot
 import com.ai.limbs.plugincenter.runtime.PluginUiContributionSnapshot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -42,6 +46,8 @@ internal fun DynamicNavigationAdminSection(
     var contributions by remember { mutableStateOf<List<PluginUiContributionSnapshot>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<DynamicSurfaceSnapshot?>(null) }
+    var renameTarget by remember { mutableStateOf<DynamicSurfaceSnapshot?>(null) }
+    var iconTarget by remember { mutableStateOf<DynamicSurfaceSnapshot?>(null) }
     val scope = rememberCoroutineScope()
 
     suspend fun refresh() {
@@ -63,8 +69,17 @@ internal fun DynamicNavigationAdminSection(
         }
     }
 
-    LaunchedEffect(Unit) {
-        runCatching { refresh() }.onFailure(onError)
+    LaunchedEffect(navigation) {
+        while (currentCoroutineContext().isActive) {
+            try {
+                refresh()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                onError(error)
+            }
+            delay(500)
+        }
     }
 
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -92,11 +107,15 @@ internal fun DynamicNavigationAdminSection(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(surface.title, fontWeight = FontWeight.SemiBold)
+                                Text(surface.title.ifEmpty { "（无名称）" }, fontWeight = FontWeight.SemiBold)
                                 Text(surface.surfaceId, style = MaterialTheme.typography.bodySmall)
-                                Text("已绑定 ${surface.bindingCount} 个入口", style = MaterialTheme.typography.bodySmall)
+                                Text("图标：${surface.iconKey} · 已绑定 ${surface.bindingCount} 个入口", style = MaterialTheme.typography.bodySmall)
                             }
-                            OutlinedButton(
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(enabled = !busy, onClick = { renameTarget = surface }) { Text("重命名") }
+                            OutlinedButton(enabled = !busy, onClick = { iconTarget = surface }) { Text("更换图标") }
+                            DangerOutlinedButton(
                                 enabled = !busy && surface.empty,
                                 onClick = { deleteTarget = surface }
                             ) { Text("删除") }
@@ -145,6 +164,26 @@ internal fun DynamicNavigationAdminSection(
             }
         }
     }
+    renameTarget?.let { target ->
+        DynamicSurfaceRenameDialog(
+            currentTitle = target.title,
+            onDismiss = { renameTarget = null },
+            onSave = { title ->
+                renameTarget = null
+                mutate { navigation.rename(target.surfaceId, title) }
+            }
+        )
+    }
+    iconTarget?.let { target ->
+        DynamicSurfaceIconDialog(
+            currentIconKey = target.iconKey,
+            onDismiss = { iconTarget = null },
+            onSelect = { iconKey ->
+                iconTarget = null
+                mutate { navigation.rename(target.surfaceId, target.title, iconKey) }
+            }
+        )
+    }
     deleteTarget?.let { target ->
         DynamicSurfaceDeleteDialog(
             title = target.title,
@@ -155,6 +194,80 @@ internal fun DynamicNavigationAdminSection(
             }
         )
     }
+}
+
+private data class DynamicIconPreset(val key: String, val emoji: String, val label: String)
+
+private val DYNAMIC_ICON_PRESETS = listOf(
+    DynamicIconPreset("extension", "🧩", "默认"),
+    DynamicIconPreset("games", "🎮", "游戏"),
+    DynamicIconPreset("book", "📖", "阅读"),
+    DynamicIconPreset("build", "🧰", "工具"),
+    DynamicIconPreset("science", "🧪", "实验"),
+    DynamicIconPreset("folder", "🗂️", "文件"),
+    DynamicIconPreset("code", "💻", "代码"),
+    DynamicIconPreset("palette", "🎨", "创作"),
+    DynamicIconPreset("music_note", "🎵", "音乐"),
+    DynamicIconPreset("android", "🤖", "智能"),
+    DynamicIconPreset("public", "🌐", "网络"),
+    DynamicIconPreset("photo", "🖼️", "图像")
+)
+
+@Composable
+private fun DynamicSurfaceRenameDialog(
+    currentTitle: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var title by remember(currentTitle) { mutableStateOf(currentTitle) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("重命名动态页面") },
+        text = {
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                label = { Text("页面名称（可留空）") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = { Button(onClick = { onSave(title) }) { Text("保存") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+private fun DynamicSurfaceIconDialog(
+    currentIconKey: String,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("选择页面图标") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                DYNAMIC_ICON_PRESETS.chunked(3).forEach { row ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        row.forEach { preset ->
+                            OutlinedButton(
+                                onClick = { onSelect(preset.key) },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text((if (preset.key == currentIconKey) "✓ " else "") + preset.emoji + " " + preset.label)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 @Composable
@@ -182,7 +295,7 @@ private fun DynamicSurfaceDeleteDialog(
             }
         },
         confirmButton = {
-            Button(
+            DangerButton(
                 enabled = password.isNotBlank(),
                 onClick = { onDelete(password) }
             ) { Text("确认删除") }

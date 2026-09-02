@@ -24,6 +24,7 @@ internal fun PluginCollectionSection(
     expanded: Boolean,
     onExpandedChange: (Boolean) -> Unit,
     searchPlaceholder: String = "搜索插件",
+    headerControl: (@Composable () -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -35,6 +36,7 @@ internal fun PluginCollectionSection(
             TextButton(onClick = { onExpandedChange(!expanded) }) {
                 Text("${if (expanded) "▼" else "▶"} $title（$totalCount）")
             }
+            headerControl?.invoke()
             OutlinedTextField(
                 value = query,
                 onValueChange = { value ->
