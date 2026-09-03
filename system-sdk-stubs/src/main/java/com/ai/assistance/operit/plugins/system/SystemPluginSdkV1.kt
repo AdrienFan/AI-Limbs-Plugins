@@ -76,7 +76,7 @@ interface SystemUiHostV1 {
  */
 fun interface SystemPluginUiActionsV2 {
     /** Host-bound capability invocation for the owner of the current UI surface. */
-    suspend fun invokeCapability(capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject
+    suspend fun invokeCapability(capabilityId: String, parameters: JSONObject): JSONObject
 }
 
 data class SystemPluginUiSurfaceV2(
