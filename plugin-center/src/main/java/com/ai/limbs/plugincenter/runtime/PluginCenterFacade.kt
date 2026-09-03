@@ -1,7 +1,9 @@
 package com.ai.limbs.plugincenter.runtime
 
 import com.ai.assistance.operit.plugins.system.SystemJsonServiceV1
-import com.ai.assistance.operit.plugins.system.SystemPluginHostV1
+import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
+import com.ai.limbs.plugin.runtime.ExtensionHubService
+import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugincenter.model.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -13,7 +15,7 @@ internal data class PluginInstallOptions(
 )
 
 internal class PluginControlPlaneFacade(
-    private val host: SystemPluginHostV1
+    private val host: SystemPluginHostV2
 ) {
     private val service get() = host.pluginAdmin
     @Volatile private var cachedSurfaces: List<HostSurfaceSnapshot> = emptyList()
@@ -59,6 +61,19 @@ internal class PluginControlPlaneFacade(
 
     suspend fun snapshots(): List<PluginControlSnapshot> =
         service.call("snapshots").optJSONArray("plugins").jsonObjects().map(::parseControlSnapshot)
+
+    fun childExtensionInventory(): ChildExtensionInventory {
+        val binding = host.providers.resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER)
+        if (binding?.ownerPluginId != "plugin.system.extension_hub") {
+            return ChildExtensionInventory(false, emptyList())
+        }
+        val hub = binding.payload as? ExtensionHubService
+            ?: return ChildExtensionInventory(false, emptyList())
+        return ChildExtensionInventory(
+            available = true,
+            targetParentPluginIds = hub.snapshots().value.map { it.target.parentPluginId }
+        )
+    }
 
     suspend fun inspectUri(uri: String): PluginImportCandidate {
         val result = service.call("inspect_uri", JSONObject().put("uri", uri))
@@ -361,6 +376,7 @@ private fun parseControlSnapshot(json: JSONObject): PluginControlSnapshot {
             versions = json.optJSONArray("versions").strings(),
             persistentState = state,
             activeManifest = manifest,
+            installIdentity = json.optJSONObject("install_identity")?.let(::parseInstallIdentity),
             usage = PluginUsageStats(usage.optLong("use_count", 0), usage.optNullableLong("last_used_at")),
             backup = json.optJSONObject("backup")?.let(::parseBackup),
             mountedVersion = json.optNullableString("mounted_version")
@@ -368,6 +384,16 @@ private fun parseControlSnapshot(json: JSONObject): PluginControlSnapshot {
         health = PluginHealthState.valueOf(json.optString("health", "OK"))
     )
 }
+
+private fun parseInstallIdentity(json: JSONObject) = PluginInstallIdentity(
+    pluginId = json.getString("plugin_id"),
+    version = json.getString("version"),
+    packageSha256 = json.optString("package_sha256"),
+    trustVerdict = json.optString("trust_verdict"),
+    signerId = json.optNullableString("signer_id"),
+    installedAtEpochMs = json.optLong("installed_at", 0L)
+)
+
 private fun parsePersistentState(json: JSONObject) = PluginPersistentState(
     pluginId = json.getString("plugin_id"),
     activeVersion = json.optNullableString("active_version"),

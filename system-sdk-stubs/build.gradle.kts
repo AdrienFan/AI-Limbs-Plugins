@@ -29,5 +29,6 @@ android {
 dependencies {
     compileOnly(platform("androidx.compose:compose-bom:2026.02.01"))
     compileOnly("androidx.compose.runtime:runtime")
+    compileOnly("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2")
     compileOnly("org.json:json:20250517")
 }

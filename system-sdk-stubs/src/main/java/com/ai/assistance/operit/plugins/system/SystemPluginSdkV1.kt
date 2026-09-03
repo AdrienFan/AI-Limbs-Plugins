@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.plugins.system
 
 import androidx.compose.runtime.Composable
+import kotlinx.coroutines.flow.Flow
 import org.json.JSONObject
 
 data class SystemHostPrimitiveDescriptor(
@@ -69,6 +70,51 @@ interface SystemUiHostV1 {
     fun registerToolboxEntry(entry: SystemToolboxEntryV1): AutoCloseable
 }
 
+/**
+ * Opaque ordinary-plugin screen envelope.  Plugin Center owns [schemaId] and [documentJson]
+ * semantics; Host owns only identity, routing and lifecycle.
+ */
+fun interface SystemPluginUiActionsV2 {
+    /** Host-bound capability invocation for the owner of the current UI surface. */
+    suspend fun invokeCapability(capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject
+}
+
+data class SystemPluginUiSurfaceV2(
+    val ownerPluginId: String,
+    val screenId: String,
+    val title: String,
+    val description: String?,
+    val schemaId: String,
+    val documentJson: String,
+    val actions: SystemPluginUiActionsV2
+)
+
+/**
+ * Single renderer contract used to move ordinary-plugin component semantics out of Stable Kernel.
+ */
+interface SystemPluginUiRendererV2 {
+    @Composable
+    fun Render(surface: SystemPluginUiSurfaceV2)
+}
+
+interface SystemUiHostV2 : SystemUiHostV1 {
+    fun registerPluginSurfaceRenderer(renderer: SystemPluginUiRendererV2): AutoCloseable
+}
+
+data class SystemPluginProviderBindingV2(
+    val ownerPluginId: String,
+    val id: String,
+    val metadata: Map<String, String>,
+    val payload: Any?
+)
+
+/** Read-only provider discovery for Plugin Center UI components. */
+interface SystemPluginProviderDirectoryV2 {
+    fun resolve(id: String): SystemPluginProviderBindingV2?
+    fun snapshot(): List<SystemPluginProviderBindingV2>
+    fun observe(id: String): Flow<SystemPluginProviderBindingV2?>
+}
+
 interface SystemPluginHostV1 {
     val hostAbi: Int
     val hostGateway: SystemHostGatewayV1
@@ -78,6 +124,44 @@ interface SystemPluginHostV1 {
     val selfMaintenance: SystemJsonServiceV1
     val navigation: SystemJsonServiceV1
     val ui: SystemUiHostV1
+}
+
+data class SystemPluginServiceCallerV2(
+    val pluginId: String,
+    val roles: Set<String>,
+    val grantedScopes: Set<String>
+)
+
+fun interface SystemPluginServiceEndpointV2 {
+    suspend fun invoke(
+        caller: SystemPluginServiceCallerV2,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject
+}
+
+interface SystemPluginServicePublisherV2 {
+    fun publish(
+        id: String,
+        apiVersion: Int,
+        endpoint: SystemPluginServiceEndpointV2,
+        metadata: Map<String, String> = emptyMap()
+    ): AutoCloseable
+}
+
+interface SystemPluginDelegatedCapabilityInvokerV2 {
+    suspend fun invokeAsActivePlugin(
+        pluginId: String,
+        capabilityId: String,
+        parameters: JSONObject = JSONObject()
+    ): JSONObject
+}
+
+interface SystemPluginHostV2 : SystemPluginHostV1 {
+    override val ui: SystemUiHostV2
+    val services: SystemPluginServicePublisherV2
+    val delegatedCapabilities: SystemPluginDelegatedCapabilityInvokerV2
+    val providers: SystemPluginProviderDirectoryV2
 }
 
 interface SystemPluginEntryV1 {

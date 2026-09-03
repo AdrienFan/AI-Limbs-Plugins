@@ -58,6 +58,7 @@ import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
 import com.ai.limbs.plugincenter.runtime.PluginCenterRuntime
 import com.ai.limbs.plugincenter.runtime.PluginInstallOptions
+import com.ai.limbs.plugincenter.model.ChildExtensionInventory
 import com.ai.limbs.plugincenter.model.PluginControlSnapshot
 import com.ai.limbs.plugincenter.model.PluginHealthState
 import com.ai.limbs.plugincenter.model.PluginLifecycleState
@@ -84,6 +85,7 @@ fun PluginCenterScreen(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     var snapshots by remember { mutableStateOf<List<PluginControlSnapshot>>(emptyList()) }
+    var childInventory by remember { mutableStateOf(ChildExtensionInventory(false, emptyList())) }
     var candidates by remember { mutableStateOf<List<PluginImportCandidate>>(emptyList()) }
     var updateTargetId by remember { mutableStateOf<String?>(null) }
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
@@ -98,7 +100,11 @@ fun PluginCenterScreen(
     var busy by remember { mutableStateOf(false) }
 
     suspend fun refresh() {
-        snapshots = withContext(Dispatchers.IO) { controlPlane.snapshots() }
+        val (latestSnapshots, latestChildInventory) = withContext(Dispatchers.IO) {
+            controlPlane.snapshots() to controlPlane.childExtensionInventory()
+        }
+        snapshots = latestSnapshots
+        childInventory = latestChildInventory
     }
 
     fun showError(error: Throwable) {
@@ -240,6 +246,7 @@ fun PluginCenterScreen(
             } else if (selected != null) {
                 PluginDetail(
                     snapshot = selected,
+                    dependencySummary = dependencySummary(selected, snapshots, childInventory),
                     busy = busy,
                     onBack = { selectedPluginId = null },
                     onEnable = { runMutation { controlPlane.enable(selected.plugin.pluginId) } },
@@ -258,6 +265,7 @@ fun PluginCenterScreen(
             } else {
                 PluginCenterHome(
                     snapshots = snapshots,
+                    childInventory = childInventory,
                     candidates = candidates,
                     busy = busy,
                     onOpenSettings = { requestAdmin(AdminAction.OpenSettings) },
@@ -423,6 +431,7 @@ fun PluginCenterScreen(
 @Composable
 private fun PluginCenterHome(
     snapshots: List<PluginControlSnapshot>,
+    childInventory: ChildExtensionInventory,
     candidates: List<PluginImportCandidate>,
     busy: Boolean,
     onOpenSettings: () -> Unit,
@@ -440,9 +449,12 @@ private fun PluginCenterHome(
     var searchInput by remember { mutableStateOf("") }
     var appliedQuery by remember { mutableStateOf("") }
     var sortMode by remember { mutableStateOf(PluginSortMode.NAME_ASC) }
-    var systemExpanded by remember { mutableStateOf(true) }
-    var installedExpanded by remember { mutableStateOf(true) }
+    var systemExpanded by remember { mutableStateOf(false) }
+    var installedExpanded by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    val dependencySummaries = remember(snapshots, childInventory) {
+        snapshots.associate { it.plugin.pluginId to dependencySummary(it, snapshots, childInventory) }
+    }
 
     val allSystemPlugins = remember(snapshots) { snapshots.filter(::isSystemPlugin) }
     val allInstalledPlugins = remember(snapshots) { snapshots.filterNot(::isSystemPlugin) }
@@ -517,6 +529,7 @@ private fun PluginCenterHome(
                     items(systemPlugins, key = { "system:${it.plugin.pluginId}" }) { snapshot ->
                         PluginCard(
                             snapshot = snapshot,
+                            dependencySummary = dependencySummaries.getValue(snapshot.plugin.pluginId),
                             onOpen = { onOpen(snapshot) },
                             onEnable = { onEnable(snapshot) },
                             onDisable = { onDisable(snapshot) },
@@ -546,6 +559,7 @@ private fun PluginCenterHome(
                     items(installedPlugins, key = { "installed:${it.plugin.pluginId}" }) { snapshot ->
                         PluginCard(
                             snapshot = snapshot,
+                            dependencySummary = dependencySummaries.getValue(snapshot.plugin.pluginId),
                             onOpen = { onOpen(snapshot) },
                             onEnable = { onEnable(snapshot) },
                             onDisable = { onDisable(snapshot) },
@@ -658,6 +672,7 @@ private fun ImportPanel(
 @Composable
 private fun PluginCard(
     snapshot: PluginControlSnapshot,
+    dependencySummary: PluginDependencySummary,
     onOpen: () -> Unit,
     onEnable: () -> Unit,
     onDisable: () -> Unit,
@@ -703,6 +718,11 @@ private fun PluginCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            Text(
+                dependencySummaryText(dependencySummary),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             if (state?.lastState == PluginLifecycleState.BLOCKED && !state.lastError.isNullOrBlank()) {
                 Text(
                     state.lastError,
@@ -736,14 +756,10 @@ private fun StatusDot(snapshot: PluginControlSnapshot) {
     Box(modifier = Modifier.size(11.dp).background(color, CircleShape))
 }
 
-private fun isSystemPlugin(snapshot: PluginControlSnapshot): Boolean {
-    val roles = snapshot.plugin.activeManifest?.roles.orEmpty()
-    return roles.any { it == "system" || it == "system_plugin" || it == "system_service" || it == "system_extension_hub" || it == "system_bridge" }
-}
-
 @Composable
 private fun PluginDetail(
     snapshot: PluginControlSnapshot,
+    dependencySummary: PluginDependencySummary,
     busy: Boolean,
     onBack: () -> Unit,
     onEnable: () -> Unit,
@@ -777,6 +793,8 @@ private fun PluginDetail(
         DetailLine("已挂载版本", snapshot.plugin.mountedVersion ?: "未挂载")
         DetailLine("使用次数", snapshot.plugin.usage.useCount.toString())
         DetailLine("最近使用", usageSummary(snapshot).substringAfter("最近使用："))
+        DetailLine("被父级插件依赖", "${dependencySummary.parentPluginCount} 个")
+        DetailLine("被子插件依赖", dependencySummary.childPluginCount?.let { "$it 个" } ?: "不可用")
         DetailLine("备份版本", snapshot.plugin.backup?.version ?: "未备份")
         Divider()
         Text("权限", fontWeight = FontWeight.Bold)

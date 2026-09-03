@@ -67,6 +67,18 @@ data class PluginPersistentState(
     val updatedAtEpochMs: Long
 )
 data class PluginUsageStats(val useCount: Long, val lastUsedAtEpochMs: Long?)
+data class PluginInstallIdentity(
+    val pluginId: String,
+    val version: String,
+    val packageSha256: String,
+    val trustVerdict: String,
+    val signerId: String?,
+    val installedAtEpochMs: Long
+)
+data class ChildExtensionInventory(
+    val available: Boolean,
+    val targetParentPluginIds: List<String>
+)
 data class PluginBackupSnapshot(
     val pluginId: String,
     val version: String,
@@ -83,6 +95,7 @@ data class PluginSnapshot(
     val versions: List<String>,
     val persistentState: PluginPersistentState?,
     val activeManifest: PluginManifest?,
+    val installIdentity: PluginInstallIdentity?,
     val usage: PluginUsageStats,
     val backup: PluginBackupSnapshot?,
     val mountedVersion: String?

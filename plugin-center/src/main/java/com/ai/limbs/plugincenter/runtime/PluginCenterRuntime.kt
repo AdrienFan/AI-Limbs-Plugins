@@ -1,9 +1,9 @@
 package com.ai.limbs.plugincenter.runtime
 
-import com.ai.assistance.operit.plugins.system.SystemPluginHostV1
+import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 
 internal object PluginCenterRuntime {
-    private var hostRef: SystemPluginHostV1? = null
+    private var hostRef: SystemPluginHostV2? = null
 
     lateinit var controlPlane: PluginControlPlaneFacade
         private set
@@ -14,8 +14,8 @@ internal object PluginCenterRuntime {
     lateinit var navigation: DynamicNavigationFacade
         private set
 
-    fun attach(host: SystemPluginHostV1) {
-        check(host.hostAbi == 1) { "Plugin Center requires AI Limbs Host ABI 1" }
+    fun attach(host: SystemPluginHostV2) {
+        check(host.hostAbi == 2) { "Plugin Center requires AI Limbs Host ABI 2" }
         hostRef = host
         controlPlane = PluginControlPlaneFacade(host)
         adminSecurity = AdminSecurityFacade(host.adminSecurity)

@@ -13,7 +13,7 @@ RUNTIME_ENTRY = "payload/plugin-center.apk"
 SIGNATURE_ENTRY = "META-INF/AILIMBS.SIG"
 FORMAT = "AIL_SYSTEM_PLUGIN_V1"
 SCHEMA_VERSION = 1
-HOST_ABI = 1
+HOST_ABI = 2
 
 
 def sha256(path: Path) -> str:
