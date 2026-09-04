@@ -67,6 +67,9 @@ import com.ai.limbs.plugincenter.model.PluginLifecycleState
 import com.ai.limbs.plugincenter.model.PluginManifest
 import com.ai.limbs.plugincenter.model.PluginImportCandidate
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -258,9 +261,16 @@ fun PluginCenterScreen(
     fun runMutation(block: suspend () -> Unit) {
         scope.launch {
             busy = true
-            runCatching { withContext(Dispatchers.IO) { block() } }
-                .onSuccess { refresh() }
-                .onFailure(::showError)
+            val lifecycleRefreshJob = launch {
+                while (isActive) {
+                    delay(50)
+                    runCatching { refresh() }
+                }
+            }
+            val result = runCatching { withContext(Dispatchers.IO) { block() } }
+            lifecycleRefreshJob.cancelAndJoin()
+            runCatching { refresh() }.onFailure(::showError)
+            result.onFailure(::showError)
             busy = false
         }
     }

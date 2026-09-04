@@ -93,10 +93,7 @@ data class ChildExtensionSummary(
 data class ChildExtensionInventory(
     val available: Boolean,
     val extensions: List<ChildExtensionSummary>
-) {
-    val targetParentPluginIds: List<String>
-        get() = extensions.map { it.parentPluginId }
-}
+)
 data class PluginBackupSnapshot(
     val pluginId: String,
     val version: String,

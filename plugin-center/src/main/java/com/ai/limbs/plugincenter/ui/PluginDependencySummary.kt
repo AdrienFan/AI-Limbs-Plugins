@@ -4,6 +4,8 @@ import com.ai.limbs.plugincenter.model.ChildExtensionInventory
 import com.ai.limbs.plugincenter.model.OfficialSystemPluginRegistry
 import com.ai.limbs.plugincenter.model.PluginControlSnapshot
 
+private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
+
 internal data class PluginDependencySummary(
     val parentPluginCount: Int,
     val childPluginCount: Int?
@@ -30,7 +32,9 @@ internal fun dependencySummary(
         }
     }
     val childPluginCount = if (childInventory.available) {
-        childInventory.targetParentPluginIds.count { it == targetId }
+        childInventory.extensions.count { child ->
+            targetId == child.parentPluginId || targetId == EXTENSION_HUB_PLUGIN_ID
+        }
     } else {
         null
     }
