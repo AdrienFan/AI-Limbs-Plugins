@@ -311,6 +311,7 @@ internal data class DynamicSurfaceSnapshot(
     val surfaceId: String,
     val title: String,
     val iconKey: String,
+    val pluginCount: Int,
     val bindingCount: Int,
     val empty: Boolean
 )
@@ -328,15 +329,22 @@ internal class DynamicNavigationFacade(
     private val service: SystemJsonServiceV1
 ) {
     suspend fun surfaces(): List<DynamicSurfaceSnapshot> =
-        service.call("list_surfaces").optJSONArray("surfaces").jsonObjects().map { item ->
-            DynamicSurfaceSnapshot(
-                surfaceId = item.getString("surface_id"),
-                title = item.getString("title"),
-                iconKey = item.optString("icon_key", "extension"),
-                bindingCount = item.optInt("binding_count", 0),
-                empty = item.optBoolean("empty", true)
-            )
-        }
+        service.call("list_surfaces").optJSONArray("surfaces").jsonObjects().map(::parseSurface)
+
+    private fun parseSurface(item: JSONObject): DynamicSurfaceSnapshot {
+        val bindings = item.optJSONArray("bindings").jsonObjects()
+        val pluginCount = bindings.mapNotNull { binding ->
+            binding.optString("owner_plugin_id").trim().takeIf { it.isNotEmpty() }
+        }.toSet().size
+        return DynamicSurfaceSnapshot(
+            surfaceId = item.getString("surface_id"),
+            title = item.getString("title"),
+            iconKey = item.optString("icon_key", "extension"),
+            pluginCount = pluginCount,
+            bindingCount = item.optInt("binding_count", bindings.size),
+            empty = item.optBoolean("empty", bindings.isEmpty())
+        )
+    }
 
     suspend fun contributions(): List<PluginUiContributionSnapshot> =
         service.call("list_contributions").optJSONArray("contributions").jsonObjects().map { item ->
@@ -354,10 +362,7 @@ internal class DynamicNavigationFacade(
         val params = JSONObject()
         title?.takeIf { it.isNotBlank() }?.let { params.put("title", it) }
         val item = service.call("create_surface", params).getJSONObject("surface")
-        return DynamicSurfaceSnapshot(
-            item.getString("surface_id"), item.getString("title"),
-            item.optString("icon_key", "extension"), item.optInt("binding_count", 0), item.optBoolean("empty", true)
-        )
+        return parseSurface(item)
     }
 
     suspend fun rename(surfaceId: String, title: String, iconKey: String? = null) {

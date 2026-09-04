@@ -28,7 +28,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugincenter.runtime.DynamicNavigationFacade
 import com.ai.limbs.plugincenter.runtime.DynamicSurfaceSnapshot
-import com.ai.limbs.plugincenter.runtime.PluginUiContributionSnapshot
+import com.ai.limbs.plugincenter.runtime.PluginControlPlaneFacade
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
@@ -36,14 +36,15 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
 
 @Composable
 internal fun DynamicNavigationAdminSection(
     navigation: DynamicNavigationFacade,
+    controlPlane: PluginControlPlaneFacade,
     onError: (Throwable) -> Unit
 ) {
     var surfaces by remember { mutableStateOf<List<DynamicSurfaceSnapshot>>(emptyList()) }
-    var contributions by remember { mutableStateOf<List<PluginUiContributionSnapshot>>(emptyList()) }
     var busy by remember { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<DynamicSurfaceSnapshot?>(null) }
     var renameTarget by remember { mutableStateOf<DynamicSurfaceSnapshot?>(null) }
@@ -51,11 +52,7 @@ internal fun DynamicNavigationAdminSection(
     val scope = rememberCoroutineScope()
 
     suspend fun refresh() {
-        val loaded = withContext(Dispatchers.IO) {
-            Pair(navigation.surfaces(), navigation.contributions())
-        }
-        surfaces = loaded.first
-        contributions = loaded.second
+        surfaces = withContext(Dispatchers.IO) { navigation.surfaces() }
     }
 
     fun mutate(block: suspend () -> Unit) {
@@ -64,6 +61,22 @@ internal fun DynamicNavigationAdminSection(
             runCatching {
                 withContext(Dispatchers.IO) { block() }
                 refresh()
+            }.onFailure(onError)
+            busy = false
+        }
+    }
+
+    fun openSurface(surface: DynamicSurfaceSnapshot) {
+        scope.launch {
+            busy = true
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    controlPlane.invokeHostPrimitive(
+                        id = "host.ui.surface@1",
+                        operation = "open",
+                        parameters = JSONObject().put("surface_id", surface.surfaceId)
+                    )
+                }
             }.onFailure(onError)
             busy = false
         }
@@ -87,19 +100,17 @@ internal fun DynamicNavigationAdminSection(
             Modifier.fillMaxWidth().padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("动态页面与插件绑定", fontWeight = FontWeight.Bold)
+            Text("新增页管理", fontWeight = FontWeight.Bold)
             Text(
-                "每个动态页面都有稳定 surfaceId。普通插件继续注册原有 UI contribution，Plugin Center 只负责把 contribution 绑定到页面。",
+                "页面名称可以留空或随时修改；页面编号按当前页面顺序连续生成，删除后自动补位，仅在开发管理界面用于区分。",
                 style = MaterialTheme.typography.bodySmall
             )
-            Text(
-                "页面 ${surfaces.size} 个 · 可用插件入口 ${contributions.size} 个",
-                style = MaterialTheme.typography.bodySmall
-            )
+            Text("页面 ${surfaces.size} 个", style = MaterialTheme.typography.bodySmall)
             if (surfaces.isEmpty()) {
                 Text("还没有动态页面；请用侧边栏底部的 ⊕ 创建。")
             }
-            surfaces.forEach { surface ->
+            surfaces.forEachIndexed { index, surface ->
+                val pageNumber = index + 1
                 Card {
                     Column(
                         Modifier.fillMaxWidth().padding(12.dp),
@@ -107,57 +118,53 @@ internal fun DynamicNavigationAdminSection(
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
-                                Text(surface.title.ifEmpty { "（无名称）" }, fontWeight = FontWeight.SemiBold)
-                                Text(surface.surfaceId, style = MaterialTheme.typography.bodySmall)
-                                Text("图标：${surface.iconKey} · 已绑定 ${surface.bindingCount} 个入口", style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(enabled = !busy, onClick = { renameTarget = surface }) { Text("重命名") }
-                            OutlinedButton(enabled = !busy, onClick = { iconTarget = surface }) { Text("更换图标") }
-                            DangerOutlinedButton(
-                                enabled = !busy && surface.empty,
-                                onClick = { deleteTarget = surface }
-                            ) { Text("删除") }
-                        }
-                        if (contributions.isEmpty()) {
-                            Text("当前没有已激活插件 UI contribution。", style = MaterialTheme.typography.bodySmall)
-                        } else {
-                            contributions.forEach { contribution ->
-                                val bound = surface.surfaceId in contribution.surfaceIds
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(contribution.title)
-                                        Text(
-                                            "${contribution.ownerPluginId} · ${contribution.tileId}",
-                                            style = MaterialTheme.typography.bodySmall
-                                        )
-                                    }
-                                    if (bound) {
-                                        OutlinedButton(
-                                            enabled = !busy,
-                                            onClick = {
-                                                mutate {
-                                                    navigation.unbind(surface.surfaceId, contribution.tileId)
-                                                }
-                                            }
-                                        ) { Text("移除") }
-                                    } else {
-                                        Button(
-                                            enabled = !busy,
-                                            onClick = {
-                                                mutate {
-                                                    navigation.bind(surface.surfaceId, contribution.tileId)
-                                                }
-                                            }
-                                        ) { Text("添加") }
-                                    }
+                                Text(
+                                    "${pageNumber.toString().padStart(2, '0')}  ${surface.title.ifEmpty { "（无名称）" }}",
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    "插件 ${surface.pluginCount} 个 · 功能入口 ${surface.bindingCount} 个",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                                Text("图标：${surface.iconKey}", style = MaterialTheme.typography.bodySmall)
+                                if (!surface.empty) {
+                                    Text(
+                                        "页面非空，需先移除全部插件入口后才能删除。",
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
                                 }
                             }
+                        }
+                        val openAvailability = controlPlane.hostPrimitiveAvailability("host.ui.surface@1", "open")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                enabled = !busy && openAvailability.available,
+                                onClick = { openSurface(surface) },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("跳转") }
+                            OutlinedButton(
+                                enabled = !busy,
+                                onClick = { renameTarget = surface },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("重命名") }
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedButton(
+                                enabled = !busy,
+                                onClick = { iconTarget = surface },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("更换图标") }
+                            DangerOutlinedButton(
+                                enabled = !busy && surface.empty,
+                                onClick = { deleteTarget = surface },
+                                modifier = Modifier.weight(1f)
+                            ) { Text("删除") }
                         }
                     }
                 }
@@ -185,8 +192,10 @@ internal fun DynamicNavigationAdminSection(
         )
     }
     deleteTarget?.let { target ->
+        val targetIndex = surfaces.indexOfFirst { it.surfaceId == target.surfaceId }
+        val targetNumber = if (targetIndex >= 0) (targetIndex + 1).toString().padStart(2, '0') else "--"
         DynamicSurfaceDeleteDialog(
-            title = target.title,
+            pageLabel = "$targetNumber  ${target.title.ifEmpty { "（无名称）" }}",
             onDismiss = { deleteTarget = null },
             onDelete = { password ->
                 deleteTarget = null
@@ -272,7 +281,7 @@ private fun DynamicSurfaceIconDialog(
 
 @Composable
 private fun DynamicSurfaceDeleteDialog(
-    title: String,
+    pageLabel: String,
     onDismiss: () -> Unit,
     onDelete: (String) -> Unit
 ) {
@@ -282,7 +291,7 @@ private fun DynamicSurfaceDeleteDialog(
         title = { Text("删除动态页面") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("仅空页面可以删除：$title")
+                Text("仅空页面可以删除：$pageLabel")
                 Text("此操作始终需要管理员密码，且 Kernel 不提供级联删除。")
                 OutlinedTextField(
                     value = password,

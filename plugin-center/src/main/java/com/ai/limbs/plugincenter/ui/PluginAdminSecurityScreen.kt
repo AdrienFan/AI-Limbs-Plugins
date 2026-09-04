@@ -583,6 +583,7 @@ internal fun PluginAdminSecurityScreen(
         }
         DynamicNavigationAdminSection(
             navigation = navigation,
+            controlPlane = controlPlane,
             onError = onError
         )
 
