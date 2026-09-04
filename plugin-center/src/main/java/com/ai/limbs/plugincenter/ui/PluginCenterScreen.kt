@@ -387,7 +387,7 @@ fun PluginCenterScreen(
                     onOnlineUpgradeChild = { child ->
                         val parent = snapshots.firstOrNull { it.plugin.pluginId == child.parentPluginId }
                         if (parent == null) {
-                            showError(IllegalStateException("找不到子插件所属父插件：${child.parentPluginId}"))
+                            showError(IllegalStateException("找不到子插件所属插件：${child.parentPluginId}"))
                         } else {
                             runMutation { controlPlane.onlineUpgradeChild(child, parent) }
                         }
@@ -1134,7 +1134,7 @@ private fun PluginDetail(
         DetailLine("已挂载版本", snapshot.plugin.mountedVersion ?: "未挂载")
         DetailLine("使用次数", snapshot.plugin.usage.useCount.toString())
         DetailLine("最近使用", usageSummary(snapshot).substringAfter("最近使用："))
-        DetailLine("被父级插件依赖", "${dependencySummary.parentPluginCount} 个")
+        DetailLine("被插件依赖", "${dependencySummary.parentPluginCount} 个")
         DetailLine("被子插件依赖", dependencySummary.childPluginCount?.let { "$it 个" } ?: "不可用")
         DetailLine("备份版本", snapshot.plugin.backup?.version ?: "未备份")
         Divider()

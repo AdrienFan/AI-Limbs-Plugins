@@ -42,5 +42,5 @@ internal fun dependencySummary(
 }
 
 internal fun dependencySummaryText(summary: PluginDependencySummary): String =
-    "被依赖：父级插件 ${summary.parentPluginCount} 个 · 子插件 " +
+    "被依赖：插件 ${summary.parentPluginCount} 个 · 子插件 " +
         (summary.childPluginCount?.let { "$it 个" } ?: "不可用")

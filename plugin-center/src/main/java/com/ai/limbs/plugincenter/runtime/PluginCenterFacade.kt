@@ -3,6 +3,7 @@ package com.ai.limbs.plugincenter.runtime
 import com.ai.assistance.operit.plugins.system.SystemJsonServiceV1
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.limbs.plugin.runtime.ExtensionHubService
+import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugincenter.model.*
 import org.json.JSONArray
@@ -109,6 +110,17 @@ internal class PluginControlPlaneFacade(
         requireExtensionHub().backup(extensionId)
     }
 
+    fun childBackupSnapshots(): List<ChildExtensionBackupSnapshot> =
+        extensionHubOrNull()?.backupSnapshots()?.value.orEmpty()
+
+    suspend fun restoreChildBackup(extensionId: String) {
+        requireExtensionHub().restoreBackup(extensionId)
+    }
+
+    suspend fun deleteChildBackup(extensionId: String) {
+        check(requireExtensionHub().deleteBackup(extensionId)) { "子插件备份不存在：$extensionId" }
+    }
+
     fun canOnlineUpgrade(snapshot: PluginControlSnapshot): Boolean {
         val manifest = snapshot.plugin.activeManifest ?: return false
         val state = snapshot.plugin.persistentState ?: return false
@@ -136,10 +148,10 @@ internal class PluginControlPlaneFacade(
     }
 
     suspend fun onlineUpgradeChild(child: ChildExtensionSummary, parent: PluginControlSnapshot) {
-        check(canOnlineUpgradeChild(child, parent)) { "子插件或父插件未声明可用的在线升级能力" }
+        check(canOnlineUpgradeChild(child, parent)) { "子插件或所属插件未声明可用的在线升级能力" }
         val capabilityId = parent.plugin.activeManifest?.provides?.capabilities
             ?.singleOrNull { it.endsWith(".child_online_update") }
-            ?: error("父插件未声明唯一的 child_online_update capability")
+            ?: error("所属插件未声明唯一的 child_online_update capability")
         host.delegatedCapabilities.invokeAsActivePlugin(
             child.parentPluginId,
             capabilityId,
@@ -160,7 +172,7 @@ internal class PluginControlPlaneFacade(
         require(manifest.optString("format") == "AIL_EXTENSION_V1") { "不是 AIL_EXTENSION_V1 安装包" }
         require(manifest.optString("extension_id") == target.extensionId) { "升级包 extension_id 与目标子插件不一致" }
         val targetJson = manifest.optJSONObject("target") ?: error("升级包缺少 target")
-        require(targetJson.optString("plugin_id") == target.parentPluginId) { "升级包父插件目标不一致" }
+        require(targetJson.optString("plugin_id") == target.parentPluginId) { "升级包所属插件目标不一致" }
         require(targetJson.optString("extension_point") == target.point) { "升级包扩展点不一致" }
         require(targetJson.optInt("api", -1) == target.apiVersion) { "升级包 API 版本不一致" }
         val installed = requireExtensionHub().install(packageFile, target.parentPluginId, target.point)
