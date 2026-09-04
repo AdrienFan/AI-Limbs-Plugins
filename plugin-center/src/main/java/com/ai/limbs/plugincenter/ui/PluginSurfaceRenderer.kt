@@ -5,12 +5,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -37,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -694,6 +698,7 @@ private fun DynamicPanelBlock(
     val fields = remember(stateJson) { current.optJSONArray("fields").toObjectList() }
     val actions = remember(stateJson) { current.optJSONArray("actions").toObjectList() }
     val queue = remember(stateJson) { current.optJSONObject("queue") }
+    val console = remember(stateJson) { current.optJSONObject("console") }
     val scope = rememberCoroutineScope()
     val values = remember(surface.ownerPluginId, providerId) { mutableStateMapOf<String, String>() }
     val initialValues = remember(surface.ownerPluginId, providerId) { mutableStateMapOf<String, String>() }
@@ -748,6 +753,9 @@ private fun DynamicPanelBlock(
             current.optJSONArray("status_lines").toStringList().forEach {
                 Text(it, style = MaterialTheme.typography.bodySmall)
             }
+            console?.let { consoleSpec ->
+                DynamicPanelConsole(consoleSpec)
+            }
             leadingActions.forEach { action ->
                 val actionId = action.requiredText("id")
                 val required = action.optJSONArray("required_field_ids").toStringList()
@@ -801,6 +809,32 @@ private fun DynamicPanelBlock(
                 )
             }
             feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+}
+
+@Composable
+private fun DynamicPanelConsole(console: JSONObject) {
+    val title = console.optString("title", "终端").trim().ifBlank { "终端" }
+    val content = console.optString("content")
+    val emptyText = console.optString("empty_text", "终端尚无输出")
+    val scrollState = rememberScrollState()
+    LaunchedEffect(content) {
+        scrollState.scrollTo(scrollState.maxValue)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        Card(Modifier.fillMaxWidth()) {
+            Text(
+                text = content.ifBlank { emptyText },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 180.dp, max = 420.dp)
+                    .verticalScroll(scrollState)
+                    .padding(10.dp),
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace
+            )
         }
     }
 }
