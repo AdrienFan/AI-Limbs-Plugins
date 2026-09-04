@@ -8,6 +8,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -59,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
 import com.ai.limbs.plugincenter.runtime.PluginCenterRuntime
 import com.ai.limbs.plugincenter.runtime.PluginInstallOptions
+import com.ai.limbs.plugincenter.runtime.PluginUiContributionSnapshot
 import com.ai.limbs.plugincenter.model.ChildExtensionInventory
 import com.ai.limbs.plugincenter.model.ChildExtensionSummary
 import com.ai.limbs.plugincenter.model.PluginControlSnapshot
@@ -74,6 +77,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
+import org.json.JSONObject
 
 private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
 private const val CHILD_ONLINE_UPDATE_ROLE = "online_update"
@@ -105,6 +109,7 @@ fun PluginCenterScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var snapshots by remember { mutableStateOf<List<PluginControlSnapshot>>(emptyList()) }
     var childInventory by remember { mutableStateOf(ChildExtensionInventory(false, emptyList())) }
+    var uiContributions by remember { mutableStateOf<List<PluginUiContributionSnapshot>>(emptyList()) }
     var candidates by remember { mutableStateOf<List<PluginImportCandidate>>(emptyList()) }
     var updateTargetId by remember { mutableStateOf<String?>(null) }
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
@@ -124,11 +129,16 @@ fun PluginCenterScreen(
     val context = LocalContext.current
 
     suspend fun refresh() {
-        val (latestSnapshots, latestChildInventory) = withContext(Dispatchers.IO) {
-            controlPlane.snapshots() to controlPlane.childExtensionInventory()
+        val refreshed = withContext(Dispatchers.IO) {
+            Triple(
+                controlPlane.snapshots(),
+                controlPlane.childExtensionInventory(),
+                navigation.contributions()
+            )
         }
-        snapshots = latestSnapshots
-        childInventory = latestChildInventory
+        snapshots = refreshed.first
+        childInventory = refreshed.second
+        uiContributions = refreshed.third
     }
 
     fun showError(error: Throwable) {
@@ -258,6 +268,50 @@ fun PluginCenterScreen(
         childUpgradeLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
     }
 
+    fun jumpToPlugin(snapshot: PluginControlSnapshot) {
+        val pluginId = snapshot.plugin.pluginId
+        scope.launch {
+            runCatching {
+                val (surfaces, contributions) = withContext(Dispatchers.IO) {
+                    navigation.surfaces() to navigation.contributions()
+                }
+                val owned = contributions.filter { it.ownerPluginId == pluginId && it.screenActive }
+                val boundSurfaceIds = owned.flatMapTo(linkedSetOf()) { it.surfaceIds }
+                val surface = surfaces.firstOrNull { it.surfaceId in boundSurfaceIds }
+                val parameters = JSONObject()
+                    .put("focus_kind", "plugin")
+                    .put("focus_id", pluginId)
+                when {
+                    surface != null -> parameters.put("surface_id", surface.surfaceId)
+                    owned.isNotEmpty() -> parameters.put("screen_id", owned.first().screenId)
+                    else -> error("插件当前没有可跳转的 UI 页面：$pluginId")
+                }
+                withContext(Dispatchers.IO) {
+                    controlPlane.invokeHostPrimitive("host.ui.surface@1", "open", parameters)
+                }
+            }.onFailure(::showError)
+        }
+    }
+
+    fun jumpToChild(child: ChildExtensionSummary) {
+        scope.launch {
+            runCatching {
+                val contribution = withContext(Dispatchers.IO) {
+                    navigation.contributions().firstOrNull {
+                        it.ownerPluginId == child.parentPluginId && it.screenActive
+                    }
+                } ?: error("所属插件当前没有可跳转的 UI 页面：${child.parentPluginId}")
+                val parameters = JSONObject()
+                    .put("screen_id", contribution.screenId)
+                    .put("focus_kind", "child")
+                    .put("focus_id", child.extensionId)
+                withContext(Dispatchers.IO) {
+                    controlPlane.invokeHostPrimitive("host.ui.surface@1", "open", parameters)
+                }
+            }.onFailure(::showError)
+        }
+    }
+
     fun runMutation(block: suspend () -> Unit) {
         scope.launch {
             busy = true
@@ -331,6 +385,11 @@ fun PluginCenterScreen(
                 PluginCenterHome(
                     snapshots = snapshots,
                     childInventory = childInventory,
+                    uiContributions = uiContributions,
+                    jumpHostAvailable = controlPlane.hostPrimitiveAvailability(
+                        "host.ui.surface@1",
+                        "open"
+                    ).available,
                     candidates = candidates,
                     busy = busy,
                     session = homeSession,
@@ -368,6 +427,7 @@ fun PluginCenterScreen(
                         }
                     },
                     onOpen = { selectedPluginId = it.plugin.pluginId },
+                    onJump = ::jumpToPlugin,
                     onOnlineUpgrade = { snapshot -> runMutation { controlPlane.onlineUpgrade(snapshot) } },
                     onEnable = { snapshot -> runMutation { controlPlane.enable(snapshot.plugin.pluginId) } },
                     onDisable = { snapshot ->
@@ -402,6 +462,7 @@ fun PluginCenterScreen(
                     onBackupChild = { child ->
                         runMutation { controlPlane.backupChildExtension(child.extensionId) }
                     },
+                    onJumpChild = ::jumpToChild,
                     onUninstallChild = { child -> uninstallChildTarget = child }
                 )
             }
@@ -538,6 +599,8 @@ fun PluginCenterScreen(
 private fun PluginCenterHome(
     snapshots: List<PluginControlSnapshot>,
     childInventory: ChildExtensionInventory,
+    uiContributions: List<PluginUiContributionSnapshot>,
+    jumpHostAvailable: Boolean,
     candidates: List<PluginImportCandidate>,
     busy: Boolean,
     session: PluginCenterHomeSessionState,
@@ -548,6 +611,7 @@ private fun PluginCenterHome(
     onClearCandidates: () -> Unit,
     onRemoveCandidate: (PluginImportCandidate) -> Unit,
     onOpen: (PluginControlSnapshot) -> Unit,
+    onJump: (PluginControlSnapshot) -> Unit,
     onOnlineUpgrade: (PluginControlSnapshot) -> Unit,
     onEnable: (PluginControlSnapshot) -> Unit,
     onDisable: (PluginControlSnapshot) -> Unit,
@@ -559,6 +623,7 @@ private fun PluginCenterHome(
     onEnableChild: (ChildExtensionSummary) -> Unit,
     onDisableChild: (ChildExtensionSummary) -> Unit,
     onBackupChild: (ChildExtensionSummary) -> Unit,
+    onJumpChild: (ChildExtensionSummary) -> Unit,
     onUninstallChild: (ChildExtensionSummary) -> Unit
 ) {
     val dependencySummaries = remember(snapshots, childInventory) {
@@ -566,6 +631,9 @@ private fun PluginCenterHome(
     }
     val childrenByParent = remember(childInventory) {
         childInventory.extensions.groupBy { it.parentPluginId }
+    }
+    val jumpablePluginIds = remember(uiContributions) {
+        uiContributions.filter { it.screenActive }.mapTo(mutableSetOf()) { it.ownerPluginId }
     }
     val normalizedQuery = session.appliedQuery.trim().lowercase()
     val systemParents = remember(snapshots) { snapshots.filter(::isSystemPlugin) }
@@ -664,6 +732,8 @@ private fun PluginCenterHome(
                                         }
                                     }
                                 },
+                                jumpEnabled = jumpHostAvailable && parentId in jumpablePluginIds,
+                                onJump = { onJump(snapshot) },
                                 onOpen = { onOpen(snapshot) },
                                 onOnlineUpgrade = { onOnlineUpgrade(snapshot) },
                                 onEnable = { onEnable(snapshot) },
@@ -676,7 +746,9 @@ private fun PluginCenterHome(
                                 visibleChildren.forEach { child ->
                                     ChildExtensionCard(
                                         child = child,
+                                        jumpEnabled = jumpHostAvailable && child.parentPluginId in jumpablePluginIds,
                                         onlineUpgradeEnabled = childOnlineUpgradeAvailable(child, snapshot),
+                                        onJump = { onJumpChild(child) },
                                         onOnlineUpgrade = { onOnlineUpgradeChild(child) },
                                         onUpgrade = { onUpgradeChild(child) },
                                         onEnable = { onEnableChild(child) },
@@ -736,6 +808,8 @@ private fun PluginCenterHome(
                                         }
                                     }
                                 },
+                                jumpEnabled = jumpHostAvailable && parentId in jumpablePluginIds,
+                                onJump = { onJump(snapshot) },
                                 onOpen = { onOpen(snapshot) },
                                 onOnlineUpgrade = { onOnlineUpgrade(snapshot) },
                                 onEnable = { onEnable(snapshot) },
@@ -748,7 +822,9 @@ private fun PluginCenterHome(
                                 visibleChildren.forEach { child ->
                                     ChildExtensionCard(
                                         child = child,
+                                        jumpEnabled = jumpHostAvailable && child.parentPluginId in jumpablePluginIds,
                                         onlineUpgradeEnabled = childOnlineUpgradeAvailable(child, snapshot),
+                                        onJump = { onJumpChild(child) },
                                         onOnlineUpgrade = { onOnlineUpgradeChild(child) },
                                         onUpgrade = { onUpgradeChild(child) },
                                         onEnable = { onEnableChild(child) },
@@ -861,10 +937,13 @@ private fun ImportPanel(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PluginCard(
     snapshot: PluginControlSnapshot,
     dependencySummary: PluginDependencySummary,
+    jumpEnabled: Boolean,
+    onJump: () -> Unit,
     childCount: Int = 0,
     childExpanded: Boolean = false,
     onToggleChildren: (() -> Unit)? = null,
@@ -938,7 +1017,11 @@ private fun PluginCard(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                TextButton(onClick = onJump, enabled = jumpEnabled) { Text("跳转") }
                 TextButton(onClick = onOpen) { Text("详情") }
                 if (state?.enabled == true) {
                     TextButton(onClick = onDisable) { Text("禁用") }
@@ -1008,10 +1091,13 @@ private fun childMatchesQuery(child: ChildExtensionSummary, normalizedQuery: Str
     ).any { it.lowercase().contains(normalizedQuery) }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChildExtensionCard(
     child: ChildExtensionSummary,
+    jumpEnabled: Boolean,
     onlineUpgradeEnabled: Boolean,
+    onJump: () -> Unit,
     onOnlineUpgrade: () -> Unit,
     onUpgrade: () -> Unit,
     onEnable: () -> Unit,
@@ -1069,7 +1155,11 @@ private fun ChildExtensionCard(
             child.lastError?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                TextButton(onClick = onJump, enabled = jumpEnabled) { Text("跳转") }
                 if (child.enabled) {
                     TextButton(onClick = onDisable) { Text("禁用") }
                 } else {

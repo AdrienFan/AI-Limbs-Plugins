@@ -1,7 +1,9 @@
 package com.ai.limbs.plugincenter.ui
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -30,6 +34,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +51,7 @@ import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import java.io.File
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
@@ -54,7 +60,19 @@ import org.json.JSONArray
 import org.json.JSONObject
 private const val UI_SCHEMA_ID = "ai_limbs.plugin_center.ui.v1"
 private const val UI_SCHEMA_VERSION = 1
+private const val HOST_FOCUS_FIELD = "_host_focus"
+private const val FOCUS_HIGHLIGHT_MS = 2400L
 private val childListExpandRequests = MutableSharedFlow<String>(extraBufferCapacity = 8)
+
+private data class HostFocusTarget(val kind: String, val id: String)
+
+private fun hostFocusTarget(document: JSONObject): HostFocusTarget? {
+    val raw = document.optJSONObject(HOST_FOCUS_FIELD) ?: return null
+    val kind = raw.optString("kind").trim().lowercase()
+    val id = raw.optString("id").trim()
+    if (kind !in setOf("plugin", "child") || id.isEmpty()) return null
+    return HostFocusTarget(kind, id)
+}
 
 /**
  * Plugin Center-owned renderer for every ordinary .ailp screen.
@@ -89,8 +107,28 @@ class PluginCenterPluginUiRenderer(
         val blocks = remember(surface.documentJson) {
             document.optJSONArray("blocks").toObjectList()
         }
+        val focus = remember(surface.documentJson) { hostFocusTarget(document) }
+        val pluginTargeted = focus?.kind == "plugin" && focus.id == surface.ownerPluginId
+        var showPluginHighlight by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf(false) }
+        LaunchedEffect(pluginTargeted, surface.documentJson) {
+            if (pluginTargeted) {
+                showPluginHighlight = true
+                delay(FOCUS_HIGHLIGHT_MS)
+                showPluginHighlight = false
+            } else {
+                showPluginHighlight = false
+            }
+        }
+        val highlightShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
         LazyColumn(
-            modifier = Modifier.fillMaxSize().padding(20.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .border(
+                    width = 2.dp,
+                    color = if (showPluginHighlight) Color.Red else Color.Transparent,
+                    shape = highlightShape
+                )
+                .padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
@@ -449,6 +487,26 @@ private fun ChildExtensionListBlock(
     var feedback by remember(surface.ownerPluginId, point) { mutableStateOf<String?>(null) }
     var expanded by remember(surface.ownerPluginId, point) { mutableStateOf(false) }
     var query by remember(surface.ownerPluginId, point) { mutableStateOf("") }
+    val routedFocus = remember(surface.documentJson) {
+        runCatching { JSONObject(surface.documentJson) }.getOrNull()?.let(::hostFocusTarget)
+    }
+    val focusedChildId = routedFocus?.takeIf { it.kind == "child" }?.id
+    val focusedChildRequester = remember(surface.ownerPluginId, point) { BringIntoViewRequester() }
+    var showChildHighlight by remember(surface.ownerPluginId, point) { mutableStateOf(false) }
+    LaunchedEffect(focusedChildId, snapshots) {
+        val target = focusedChildId?.takeIf { id -> snapshots.any { it.extensionId == id } }
+        if (target != null) {
+            query = ""
+            expanded = true
+            delay(180)
+            focusedChildRequester.bringIntoView()
+            showChildHighlight = true
+            delay(FOCUS_HIGHLIGHT_MS)
+            showChildHighlight = false
+        } else {
+            showChildHighlight = false
+        }
+    }
     LaunchedEffect(surface.ownerPluginId, point) {
         childListExpandRequests.collect { requestKey ->
             if (requestKey == childListKey(surface.ownerPluginId, point)) {
@@ -526,7 +584,24 @@ private fun ChildExtensionListBlock(
             }
             visibleSnapshots.forEach { snapshot ->
                 val backup = backups.firstOrNull { it.extensionId == snapshot.extensionId }
-                Card(Modifier.fillMaxWidth()) {
+                val isFocusedChild = snapshot.extensionId == focusedChildId
+                val childShape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                val childModifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (isFocusedChild) {
+                            Modifier
+                                .bringIntoViewRequester(focusedChildRequester)
+                                .border(
+                                    width = 2.dp,
+                                    color = if (showChildHighlight) Color.Red else Color.Transparent,
+                                    shape = childShape
+                                )
+                        } else {
+                            Modifier
+                        }
+                    )
+                Card(modifier = childModifier, shape = childShape) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("${snapshot.displayName} · ${snapshot.version}", style = MaterialTheme.typography.titleSmall)
                         Text("${snapshot.extensionId} · ${snapshot.lifecycle}", style = MaterialTheme.typography.bodySmall)
@@ -612,10 +687,13 @@ private fun DynamicPanelBlock(
         return
     }
 
-    // Everything below is Plugin Center schema, not Host ABI. New field/action kinds are added here
-    // without changing InProcessUiStateProvider or rebuilding Stable Kernel.
+    // Everything below is Plugin Center schema, not Host ABI. File/folder pickers and queue cards
+    // deliberately live here so ordinary plugins can request interaction without gaining Activity,
+    // NavController or raw Android UI ownership. Stable Kernel still transports opaque JSON only.
+    val leadingActions = remember(stateJson) { current.optJSONArray("leading_actions").toObjectList() }
     val fields = remember(stateJson) { current.optJSONArray("fields").toObjectList() }
     val actions = remember(stateJson) { current.optJSONArray("actions").toObjectList() }
+    val queue = remember(stateJson) { current.optJSONObject("queue") }
     val scope = rememberCoroutineScope()
     val values = remember(surface.ownerPluginId, providerId) { mutableStateMapOf<String, String>() }
     val initialValues = remember(surface.ownerPluginId, providerId) { mutableStateMapOf<String, String>() }
@@ -636,6 +714,31 @@ private fun DynamicPanelBlock(
         }
     }
 
+    fun submit(actionId: String, extra: JSONObject? = null) {
+        scope.launch {
+            busyAction = actionId
+            try {
+                val fieldValues = JSONObject().apply {
+                    values.forEach { (key, value) -> put(key, value) }
+                }
+                val payload = JSONObject().put("field_values", fieldValues)
+                if (extra != null) {
+                    extra.keys().forEach { key -> payload.put(key, extra.get(key)) }
+                }
+                val rawResult = provider.perform(actionId, payload.toString())
+                val result = rawResult.toJsonObjectOrNull() ?: JSONObject()
+                result.optJSONObject("field_values")?.let { returned ->
+                    returned.keys().forEach { key -> values[key] = returned.optString(key) }
+                }
+                feedback = result.optString("message").takeIf { it.isNotBlank() }
+            } catch (error: Throwable) {
+                feedback = "操作失败：${error.message ?: "未知错误"}"
+            } finally {
+                busyAction = null
+            }
+        }
+    }
+
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(current.optString("title"), style = MaterialTheme.typography.titleMedium)
@@ -644,6 +747,29 @@ private fun DynamicPanelBlock(
             }
             current.optJSONArray("status_lines").toStringList().forEach {
                 Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+            leadingActions.forEach { action ->
+                val actionId = action.requiredText("id")
+                val required = action.optJSONArray("required_field_ids").toStringList()
+                val requiredReady = required.all { values[it].orEmpty().isNotBlank() }
+                DynamicPanelActionButton(
+                    action = action,
+                    enabled = action.optBoolean("enabled", true) && requiredReady && busyAction == null,
+                    busy = busyAction == actionId,
+                    onInvoke = { extra -> submit(actionId, extra) }
+                )
+            }
+            queue?.let { queueSpec ->
+                DynamicPanelQueue(
+                    queue = queueSpec,
+                    enabled = busyAction == null,
+                    onEvent = { eventId, itemId ->
+                        submit(
+                            eventId,
+                            itemId?.let { JSONObject().put("item_id", it) }
+                        )
+                    }
+                )
             }
             fields.forEach { field ->
                 val id = field.requiredText("id")
@@ -667,35 +793,136 @@ private fun DynamicPanelBlock(
                 val actionId = action.requiredText("id")
                 val required = action.optJSONArray("required_field_ids").toStringList()
                 val requiredReady = required.all { values[it].orEmpty().isNotBlank() }
-                Button(
+                DynamicPanelActionButton(
+                    action = action,
                     enabled = action.optBoolean("enabled", true) && requiredReady && busyAction == null,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        scope.launch {
-                            busyAction = actionId
-                            try {
-                                val fieldValues = JSONObject().apply {
-                                    values.forEach { (key, value) -> put(key, value) }
-                                }
-                                val rawResult = provider.perform(
-                                    actionId,
-                                    JSONObject().put("field_values", fieldValues).toString()
-                                )
-                                val result = rawResult.toJsonObjectOrNull() ?: JSONObject()
-                                result.optJSONObject("field_values")?.let { returned ->
-                                    returned.keys().forEach { key -> values[key] = returned.optString(key) }
-                                }
-                                feedback = result.optString("message").takeIf { it.isNotBlank() }
-                            } catch (error: Throwable) {
-                                feedback = "操作失败：${error.message ?: "未知错误"}"
-                            } finally {
-                                busyAction = null
-                            }
-                        }
-                    }
-                ) { Text(if (busyAction == actionId) "处理中…" else action.requiredText("label")) }
+                    busy = busyAction == actionId,
+                    onInvoke = { extra -> submit(actionId, extra) }
+                )
             }
             feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+}
+
+/**
+ * Generic Plugin Center picker action. The picker returns opaque content/tree URIs to the provider;
+ * Plugin Center does not interpret the selected files and therefore stays reusable across plugins.
+ */
+@Composable
+private fun DynamicPanelActionButton(
+    action: JSONObject,
+    enabled: Boolean,
+    busy: Boolean,
+    onInvoke: (JSONObject?) -> Unit
+) {
+    val context = LocalContext.current
+    val kind = action.optString("kind", "invoke").trim().lowercase()
+    val label = action.requiredText("label")
+    val multiple = action.optBoolean("multiple", false)
+    val mimeTypes = action.optJSONArray("mime_types").toStringList()
+        .ifEmpty { listOf("*/*") }
+        .toTypedArray()
+
+    fun persistRead(uri: android.net.Uri) {
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        }
+    }
+
+    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            persistRead(uri)
+            onInvoke(JSONObject().put("selected_uri", uri.toString()))
+        }
+    }
+    val multiFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            uris.forEach(::persistRead)
+            onInvoke(JSONObject().put("selected_uris", JSONArray(uris.map { it.toString() })))
+        }
+    }
+    val directoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            persistRead(uri)
+            onInvoke(JSONObject().put("selected_uri", uri.toString()))
+        }
+    }
+
+    Button(
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth(),
+        onClick = {
+            when (kind) {
+                "file_picker" -> if (multiple) multiFileLauncher.launch(mimeTypes) else fileLauncher.launch(mimeTypes)
+                "directory_picker" -> directoryLauncher.launch(null)
+                else -> onInvoke(null)
+            }
+        }
+    ) {
+        Text(if (busy) "处理中…" else label)
+    }
+}
+
+/**
+ * Queue is a presentation primitive only: items expose stable ids and descriptive lines, while all
+ * mutations are delegated back to the owning provider through event ids. The renderer never knows
+ * whether a row represents an APK, download, model, task or any other plugin-owned entity.
+ */
+@Composable
+private fun DynamicPanelQueue(
+    queue: JSONObject,
+    enabled: Boolean,
+    onEvent: (eventId: String, itemId: String?) -> Unit
+) {
+    val items = queue.optJSONArray("items").toObjectList()
+    val removeEventId = queue.optString("remove_event_id").trim()
+    val clearEventId = queue.optString("clear_event_id").trim()
+    val title = queue.optString("title", "队列").trim().ifBlank { "队列" }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("$title（${items.size}）", style = MaterialTheme.typography.titleSmall)
+        if (items.isEmpty()) {
+            Text(
+                queue.optString("empty_text", "当前队列为空"),
+                style = MaterialTheme.typography.bodySmall
+            )
+        } else {
+            items.forEach { item ->
+                val itemId = item.requiredText("id")
+                Card(Modifier.fillMaxWidth()) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(item.requiredText("title"), fontWeight = FontWeight.SemiBold)
+                        item.optString("subtitle").takeIf { it.isNotBlank() }?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                        item.optJSONArray("lines").toStringList().forEach {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                        item.optString("status").takeIf { it.isNotBlank() }?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (removeEventId.isNotBlank()) {
+                            Button(
+                                enabled = enabled,
+                                onClick = { onEvent(removeEventId, itemId) }
+                            ) { Text(queue.optString("remove_label", "移除")) }
+                        }
+                    }
+                }
+            }
+            if (clearEventId.isNotBlank()) {
+                Button(
+                    enabled = enabled,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = { onEvent(clearEventId, null) }
+                ) { Text(queue.optString("clear_label", "全部清除")) }
+            }
         }
     }
 }

@@ -322,6 +322,7 @@ internal data class PluginUiContributionSnapshot(
     val title: String,
     val description: String?,
     val screenId: String,
+    val screenActive: Boolean,
     val surfaceIds: Set<String>
 )
 
@@ -354,6 +355,7 @@ internal class DynamicNavigationFacade(
                 title = item.getString("title"),
                 description = item.optNullableString("description"),
                 screenId = item.getString("screen_id"),
+                screenActive = item.optBoolean("screen_active", true),
                 surfaceIds = item.optJSONArray("surface_ids").strings().toSet()
             )
         }
