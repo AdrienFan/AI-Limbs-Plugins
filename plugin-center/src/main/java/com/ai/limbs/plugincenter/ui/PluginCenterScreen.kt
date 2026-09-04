@@ -74,6 +74,15 @@ private sealed interface AdminAction {
     data class DisableSystem(val pluginId: String) : AdminAction
     data class Uninstall(val pluginId: String) : AdminAction
 }
+
+private class PluginCenterHomeSessionState {
+    var searchInput by mutableStateOf("")
+    var appliedQuery by mutableStateOf("")
+    var sortMode by mutableStateOf(PluginSortMode.NAME_ASC)
+    var systemExpanded by mutableStateOf(false)
+    var installedExpanded by mutableStateOf(false)
+    var expandedParentIds by mutableStateOf<Set<String>>(emptySet())
+}
 @Composable
 fun PluginCenterScreen(
     onBack: () -> Unit,
@@ -100,6 +109,8 @@ fun PluginCenterScreen(
     var showAdminRecovery by remember { mutableStateOf(false) }
     var recoveryKeyToShow by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    val homeSession = remember { PluginCenterHomeSessionState() }
+    val homeListState = rememberLazyListState()
 
     suspend fun refresh() {
         val (latestSnapshots, latestChildInventory) = withContext(Dispatchers.IO) {
@@ -270,6 +281,8 @@ fun PluginCenterScreen(
                     childInventory = childInventory,
                     candidates = candidates,
                     busy = busy,
+                    session = homeSession,
+                    listState = homeListState,
                     onOpenSettings = { requestAdmin(AdminAction.OpenSettings) },
                     onChoose = { choosePlugin() },
                     onClearCandidates = { candidates = emptyList() },
@@ -461,6 +474,8 @@ private fun PluginCenterHome(
     childInventory: ChildExtensionInventory,
     candidates: List<PluginImportCandidate>,
     busy: Boolean,
+    session: PluginCenterHomeSessionState,
+    listState: androidx.compose.foundation.lazy.LazyListState,
     onOpenSettings: () -> Unit,
     onChoose: () -> Unit,
     onInstall: () -> Unit,
@@ -477,41 +492,17 @@ private fun PluginCenterHome(
     onBackupChild: (ChildExtensionSummary) -> Unit,
     onUninstallChild: (ChildExtensionSummary) -> Unit
 ) {
-    var searchInput by remember { mutableStateOf("") }
-    var appliedQuery by remember { mutableStateOf("") }
-    var sortMode by remember { mutableStateOf(PluginSortMode.NAME_ASC) }
-    var installedExpanded by remember { mutableStateOf(false) }
-    var expandedParentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    val listState = rememberLazyListState()
     val dependencySummaries = remember(snapshots, childInventory) {
         snapshots.associate { it.plugin.pluginId to dependencySummary(it, snapshots, childInventory) }
     }
-
-    // This control plane owns ordinary .ailp parents. .ailpsys system-plugin lifecycle
-    // is outside this parent-plugin inventory, so do not present trusted parents as system plugins.
-    val allInstalledPlugins = remember(snapshots) { snapshots }
     val childrenByParent = remember(childInventory) {
         childInventory.extensions.groupBy { it.parentPluginId }
     }
-    val normalizedQuery = appliedQuery.trim().lowercase()
-    val installedPlugins = remember(allInstalledPlugins, childrenByParent, normalizedQuery, sortMode) {
-        val directlyMatched = filterAndSortPlugins(allInstalledPlugins, normalizedQuery, sortMode)
-        if (normalizedQuery.isBlank()) {
-            directlyMatched
-        } else {
-            val directIds = directlyMatched.mapTo(mutableSetOf()) { it.plugin.pluginId }
-            val childMatchedParentIds = childrenByParent
-                .filterValues { children -> children.any { childMatchesQuery(it, normalizedQuery) } }
-                .keys
-            filterAndSortPlugins(
-                allInstalledPlugins.filter {
-                    it.plugin.pluginId in directIds || it.plugin.pluginId in childMatchedParentIds
-                },
-                "",
-                sortMode
-            )
-        }
-    }
+    val normalizedQuery = session.appliedQuery.trim().lowercase()
+    val systemParents = remember(snapshots) { snapshots.filter(::isSystemPlugin) }
+    val installedParents = remember(snapshots) { snapshots.filterNot(::isSystemPlugin) }
+    val visibleSystemParents = filterParentPluginsWithChildren(systemParents, childrenByParent, normalizedQuery, session.sortMode)
+    val visibleInstalledParents = filterParentPluginsWithChildren(installedParents, childrenByParent, normalizedQuery, session.sortMode)
     val searching = normalizedQuery.isNotBlank()
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -546,35 +537,39 @@ private fun PluginCenterHome(
             }
             item(key = "plugin-search-sort") {
                 PluginSearchSortControls(
-                    input = searchInput,
-                    appliedQuery = appliedQuery,
-                    sortMode = sortMode,
-                    onInputChange = { searchInput = it },
-                    onApplySearch = { appliedQuery = searchInput.trim() },
+                    input = session.searchInput,
+                    appliedQuery = session.appliedQuery,
+                    sortMode = session.sortMode,
+                    onInputChange = { session.searchInput = it },
+                    onApplySearch = { session.appliedQuery = session.searchInput.trim() },
                     onClearSearch = {
-                        searchInput = ""
-                        appliedQuery = ""
+                        session.searchInput = ""
+                        session.appliedQuery = ""
                     },
-                    onSortModeChange = { sortMode = it }
+                    onSortModeChange = { session.sortMode = it }
                 )
             }
-            item(key = "installed-header") {
+
+            item(key = "system-header") {
                 CollapsiblePluginSectionHeader(
-                    title = "父级插件",
-                    expanded = installedExpanded,
-                    matchedCount = installedPlugins.size,
-                    totalCount = allInstalledPlugins.size,
+                    title = "系统插件",
+                    expanded = session.systemExpanded,
+                    matchedCount = visibleSystemParents.size,
+                    totalCount = systemParents.size,
                     searching = searching,
-                    onToggle = { installedExpanded = !installedExpanded }
+                    onToggle = { session.systemExpanded = !session.systemExpanded }
                 )
             }
-            if (installedExpanded) {
-                if (installedPlugins.isEmpty()) {
-                    item(key = "installed-empty") {
-                        Text(if (searching) "父级插件中没有搜索结果" else "当前为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (session.systemExpanded) {
+                if (visibleSystemParents.isEmpty()) {
+                    item(key = "system-empty") {
+                        Text(
+                            if (searching) "系统插件中没有搜索结果" else "当前为空",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 } else {
-                    items(installedPlugins, key = { "installed:${it.plugin.pluginId}" }) { snapshot ->
+                    items(visibleSystemParents, key = { "system:${it.plugin.pluginId}" }) { snapshot ->
                         val parentId = snapshot.plugin.pluginId
                         val allChildren = childrenByParent[parentId].orEmpty()
                             .sortedWith(compareBy({ it.displayName.lowercase() }, { it.extensionId }))
@@ -584,8 +579,7 @@ private fun PluginCenterHome(
                             allChildren
                         }
                         val forcedExpanded = searching && visibleChildren.isNotEmpty()
-                        val childrenExpanded = forcedExpanded || parentId in expandedParentIds
-
+                        val childrenExpanded = forcedExpanded || parentId in session.expandedParentIds
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             PluginCard(
                                 snapshot = snapshot,
@@ -594,10 +588,78 @@ private fun PluginCenterHome(
                                 childExpanded = childrenExpanded,
                                 onToggleChildren = if (allChildren.isEmpty()) null else {
                                     {
-                                        expandedParentIds = if (parentId in expandedParentIds) {
-                                            expandedParentIds - parentId
+                                        session.expandedParentIds = if (parentId in session.expandedParentIds) {
+                                            session.expandedParentIds - parentId
                                         } else {
-                                            expandedParentIds + parentId
+                                            session.expandedParentIds + parentId
+                                        }
+                                    }
+                                },
+                                onOpen = { onOpen(snapshot) },
+                                onEnable = { onEnable(snapshot) },
+                                onDisable = { onDisable(snapshot) },
+                                onUpdate = { onUpdate(snapshot) },
+                                onUninstall = { onUninstall(snapshot) },
+                                onBackup = { onBackup(snapshot) }
+                            )
+                            if (childrenExpanded) {
+                                visibleChildren.forEach { child ->
+                                    ChildExtensionCard(
+                                        child = child,
+                                        onEnable = { onEnableChild(child) },
+                                        onDisable = { onDisableChild(child) },
+                                        onBackup = { onBackupChild(child) },
+                                        onUninstall = { onUninstallChild(child) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            item(key = "installed-header") {
+                CollapsiblePluginSectionHeader(
+                    title = "已安装插件",
+                    expanded = session.installedExpanded,
+                    matchedCount = visibleInstalledParents.size,
+                    totalCount = installedParents.size,
+                    searching = searching,
+                    onToggle = { session.installedExpanded = !session.installedExpanded }
+                )
+            }
+            if (session.installedExpanded) {
+                if (visibleInstalledParents.isEmpty()) {
+                    item(key = "installed-empty") {
+                        Text(
+                            if (searching) "已安装插件中没有搜索结果" else "当前为空",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    items(visibleInstalledParents, key = { "installed:${it.plugin.pluginId}" }) { snapshot ->
+                        val parentId = snapshot.plugin.pluginId
+                        val allChildren = childrenByParent[parentId].orEmpty()
+                            .sortedWith(compareBy({ it.displayName.lowercase() }, { it.extensionId }))
+                        val visibleChildren = if (searching) {
+                            allChildren.filter { childMatchesQuery(it, normalizedQuery) }
+                        } else {
+                            allChildren
+                        }
+                        val forcedExpanded = searching && visibleChildren.isNotEmpty()
+                        val childrenExpanded = forcedExpanded || parentId in session.expandedParentIds
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PluginCard(
+                                snapshot = snapshot,
+                                dependencySummary = dependencySummaries.getValue(parentId),
+                                childCount = allChildren.size,
+                                childExpanded = childrenExpanded,
+                                onToggleChildren = if (allChildren.isEmpty()) null else {
+                                    {
+                                        session.expandedParentIds = if (parentId in session.expandedParentIds) {
+                                            session.expandedParentIds - parentId
+                                        } else {
+                                            session.expandedParentIds + parentId
                                         }
                                     }
                                 },
@@ -741,10 +803,13 @@ private fun PluginCard(
     val currentVersion = state?.activeVersion
     val backupVersion = snapshot.plugin.backup?.version
     val canBackup = currentVersion != null && backupVersion != currentVersion
+    val cardModifier = if (onToggleChildren != null) {
+        Modifier.fillMaxWidth().clickable(onClick = onToggleChildren)
+    } else {
+        Modifier.fillMaxWidth()
+    }
     Card(
-        modifier = Modifier.fillMaxWidth().clickable {
-            if (onToggleChildren != null) onToggleChildren() else onOpen()
-        },
+        modifier = cardModifier,
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -796,9 +861,7 @@ private fun PluginCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (onToggleChildren != null) {
-                    TextButton(onClick = onOpen) { Text("详情") }
-                }
+                TextButton(onClick = onOpen) { Text("详情") }
                 if (state?.enabled == true) {
                     TextButton(onClick = onDisable) { Text("禁用") }
                 } else {
@@ -810,6 +873,27 @@ private fun PluginCard(
             }
         }
     }
+}
+
+private fun filterParentPluginsWithChildren(
+    parents: List<PluginControlSnapshot>,
+    childrenByParent: Map<String, List<ChildExtensionSummary>>,
+    normalizedQuery: String,
+    sortMode: PluginSortMode
+): List<PluginControlSnapshot> {
+    val directlyMatched = filterAndSortPlugins(parents, normalizedQuery, sortMode)
+    if (normalizedQuery.isBlank()) return directlyMatched
+    val directIds = directlyMatched.mapTo(mutableSetOf()) { it.plugin.pluginId }
+    val parentIds = parents.mapTo(mutableSetOf()) { it.plugin.pluginId }
+    val childMatchedParentIds = childrenByParent
+        .filterKeys { it in parentIds }
+        .filterValues { children -> children.any { childMatchesQuery(it, normalizedQuery) } }
+        .keys
+    return filterAndSortPlugins(
+        parents.filter { it.plugin.pluginId in directIds || it.plugin.pluginId in childMatchedParentIds },
+        "",
+        sortMode
+    )
 }
 
 private fun childMatchesQuery(child: ChildExtensionSummary, normalizedQuery: String): Boolean {
@@ -833,10 +917,10 @@ private fun ChildExtensionCard(
     onBackup: () -> Unit,
     onUninstall: () -> Unit
 ) {
-    val statusColor = when (child.lifecycle) {
-        "ACTIVE" -> Color(0xFF00C853)
-        "DISABLED" -> Color(0xFFD32F2F)
-        "FAILED" -> Color(0xFFE65100)
+    val statusColor = when {
+        !child.enabled || child.lifecycle == "DISABLED" -> Color(0xFF757575)
+        child.lifecycle == "ACTIVE" -> Color(0xFF00C853)
+        child.lifecycle == "FAILED" -> Color(0xFFD32F2F)
         else -> Color(0xFFFFB300)
     }
     val canBackup = child.backupVersion != child.version
@@ -900,9 +984,9 @@ private fun ChildExtensionCard(
 private fun StatusDot(snapshot: PluginControlSnapshot) {
     val state = snapshot.plugin.persistentState
     val color = when {
-        snapshot.health == PluginHealthState.FAILED -> Color(0xFFE65100)
+        state?.enabled == false || state?.lastState == PluginLifecycleState.DISABLED -> Color(0xFF757575)
+        snapshot.health == PluginHealthState.FAILED || state?.lastState == PluginLifecycleState.FAILED -> Color(0xFFD32F2F)
         state?.lastState == PluginLifecycleState.ACTIVE -> Color(0xFF00C853)
-        state?.enabled == false -> Color(0xFFD32F2F)
         else -> Color(0xFFFFB300)
     }
     Box(modifier = Modifier.size(11.dp).background(color, CircleShape))
