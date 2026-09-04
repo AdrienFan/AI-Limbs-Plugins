@@ -420,6 +420,9 @@ internal fun PluginAdminSecurityScreen(
         }
     }
 
+    val filteredToggleablePrimitives = filteredPrimitives.filter { it.policyAllowed != null }
+    val allFilteredPrimitivesAllowed = filteredToggleablePrimitives.isNotEmpty() &&
+        filteredToggleablePrimitives.all { it.policyAllowed == true }
     val normalizedSurfaceQuery = surfaceQuery.trim().lowercase()
     val filteredSurfaces = remember(surfaces, normalizedSurfaceQuery) {
         if (normalizedSurfaceQuery.isBlank()) {
@@ -487,7 +490,7 @@ internal fun PluginAdminSecurityScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← 返回 Plugin Center") }
+            TextButton(onClick = onBack) { Text("← 插件管理") }
         }
         Text("管理员安全中心", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -732,7 +735,7 @@ internal fun PluginAdminSecurityScreen(
             }
 
             PluginCollectionSection(
-                title = "AI Limbs 内接口 · Host Primitives",
+                title = "Host Primitives",
                 totalCount = primitives.size,
                 matchedCount = filteredPrimitives.size,
                 query = primitiveQuery,
@@ -748,12 +751,41 @@ internal fun PluginAdminSecurityScreen(
                     )
                 }
             ) {
-                Text("Stable Host Primitive Catalog", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    "完整展示本轮 V0.7.1 考古得到的 39 条宿主原语。BOUND 表示已接入 Plugin Center v2；DECLARED 表示正式边界已确定但尚未接线；PARTIAL 表示基础设施不完整；KERNEL_GATE 只由内核持有。",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text("显示 ${filteredPrimitives.size} / ${primitives.size}", style = MaterialTheme.typography.bodySmall)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "显示 ${filteredPrimitives.size} / ${primitives.size}",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedButton(
+                        enabled = !busy && filteredToggleablePrimitives.isNotEmpty(),
+                        onClick = {
+                            val targetPrimitives = filteredToggleablePrimitives
+                            val targetAllowed = !allFilteredPrimitivesAllowed
+                            runAdminMutation {
+                                targetPrimitives.forEach { primitive ->
+                                    controlPlane.setHostPrimitiveAllowed(primitive.definition.id, targetAllowed)
+                                }
+                            }
+                        }
+                    ) {
+                        Text(
+                            when {
+                                normalizedPrimitiveQuery.isBlank() && allFilteredPrimitivesAllowed -> "取消全选"
+                                normalizedPrimitiveQuery.isBlank() -> "全选"
+                                allFilteredPrimitivesAllowed -> "取消选择结果"
+                                else -> "全选结果"
+                            }
+                        )
+                    }
+                    if (primitiveQuery.isNotBlank()) {
+                        TextButton(onClick = { primitiveQuery = "" }) { Text("清除搜索") }
+                    }
+                }
                 if (filteredPrimitives.isEmpty()) {
                     Text("没有匹配的 Host Primitive", style = MaterialTheme.typography.bodySmall)
                 } else {
@@ -781,11 +813,6 @@ internal fun PluginAdminSecurityScreen(
                     )
                 }
             ) {
-                Text("Plugin Surface Policy", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text(
-                    "这里管理 Extension Point、插件发布总线，以及已经接通的 Host Primitive 策略；39 条正式 Host Primitive 的唯一目录在上方。",
-                    style = MaterialTheme.typography.bodySmall
-                )
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,

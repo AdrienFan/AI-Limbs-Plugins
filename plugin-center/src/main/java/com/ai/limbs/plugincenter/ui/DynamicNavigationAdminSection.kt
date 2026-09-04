@@ -101,10 +101,6 @@ internal fun DynamicNavigationAdminSection(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text("新增页管理", fontWeight = FontWeight.Bold)
-            Text(
-                "页面名称可以留空或随时修改；页面编号按当前页面顺序连续生成，删除后自动补位，仅在开发管理界面用于区分。",
-                style = MaterialTheme.typography.bodySmall
-            )
             Text("页面 ${surfaces.size} 个", style = MaterialTheme.typography.bodySmall)
             if (surfaces.isEmpty()) {
                 Text("还没有动态页面；请用侧边栏底部的 ⊕ 创建。")

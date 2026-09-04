@@ -35,7 +35,7 @@ class PluginCenterEntry : SystemPluginEntryV1 {
             hostV2.ui.registerToolboxEntry(
                 SystemToolboxEntryV1(
                     id = "plugin_center.main",
-                    title = "Plugin Center",
+                    title = "AI Limbs 总控台",
                     description = "AI Limbs 插件与系统接口管理中心",
                     iconKey = "extension",
                     page = PluginCenterPage()

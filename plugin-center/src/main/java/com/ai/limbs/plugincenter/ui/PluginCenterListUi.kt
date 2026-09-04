@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -52,6 +54,16 @@ enum class PluginSortMode(val label: String) {
     LAST_USED_ASC("最近使用 远 → 近")
 }
 
+internal data class PluginPageFilterOption(
+    val id: String,
+    val label: String
+)
+
+internal data class PluginStatusFilterOption(
+    val id: String,
+    val label: String
+)
+
 internal fun filterAndSortPlugins(
     items: List<PluginControlSnapshot>,
     query: String,
@@ -96,17 +108,28 @@ internal fun usageSummary(snapshot: PluginControlSnapshot): String {
 }
 
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun PluginSearchSortControls(
     input: String,
     appliedQuery: String,
     sortMode: PluginSortMode,
+    pageFilterOptions: List<PluginPageFilterOption>,
+    selectedPageFilterIds: Set<String>,
+    statusFilterOptions: List<PluginStatusFilterOption>,
+    selectedStatusFilterIds: Set<String>,
     onInputChange: (String) -> Unit,
     onApplySearch: () -> Unit,
     onClearSearch: () -> Unit,
+    onPageFilterChange: (Set<String>) -> Unit,
+    onStatusFilterChange: (Set<String>) -> Unit,
     onSortModeChange: (PluginSortMode) -> Unit
 ) {
     val focusManager = LocalFocusManager.current
+    var pageFilterExpanded by remember { mutableStateOf(false) }
+    var pendingPageFilterIds by remember { mutableStateOf(selectedPageFilterIds) }
+    var statusFilterExpanded by remember { mutableStateOf(false) }
+    var pendingStatusFilterIds by remember { mutableStateOf(selectedStatusFilterIds) }
     var sortExpanded by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
@@ -122,10 +145,10 @@ internal fun PluginSearchSortControls(
                 focusManager.clearFocus()
             })
         )
-        Row(
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             OutlinedButton(onClick = {
                 onApplySearch()
@@ -137,7 +160,91 @@ internal fun PluginSearchSortControls(
                     focusManager.clearFocus()
                 }) { Text("清除搜索") }
             }
-            Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            Box {
+                OutlinedButton(onClick = {
+                    pendingPageFilterIds = selectedPageFilterIds
+                    pageFilterExpanded = true
+                }) {
+                    Text(if (selectedPageFilterIds.isEmpty()) "页面" else "页面 · ${selectedPageFilterIds.size}")
+                }
+                DropdownMenu(
+                    expanded = pageFilterExpanded,
+                    onDismissRequest = { pageFilterExpanded = false }
+                ) {
+                    Text(
+                        "按页面筛选",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        fontWeight = FontWeight.Bold
+                    )
+                    pageFilterOptions.forEach { option ->
+                        val selected = option.id in pendingPageFilterIds
+                        DropdownMenuItem(
+                            text = { Text("${if (selected) "☑" else "☐"} ${option.label}") },
+                            onClick = {
+                                pendingPageFilterIds = if (selected) {
+                                    pendingPageFilterIds - option.id
+                                } else {
+                                    pendingPageFilterIds + option.id
+                                }
+                            }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("清除页面筛选") },
+                        onClick = { pendingPageFilterIds = emptySet() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("应用") },
+                        onClick = {
+                            onPageFilterChange(pendingPageFilterIds)
+                            pageFilterExpanded = false
+                        }
+                    )
+                }
+            }
+            Box {
+                OutlinedButton(onClick = {
+                    pendingStatusFilterIds = selectedStatusFilterIds
+                    statusFilterExpanded = true
+                }) {
+                    Text(if (selectedStatusFilterIds.isEmpty()) "状态" else "状态 · ${selectedStatusFilterIds.size}")
+                }
+                DropdownMenu(
+                    expanded = statusFilterExpanded,
+                    onDismissRequest = { statusFilterExpanded = false }
+                ) {
+                    Text(
+                        "按状态灯筛选",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        fontWeight = FontWeight.Bold
+                    )
+                    statusFilterOptions.forEach { option ->
+                        val selected = option.id in pendingStatusFilterIds
+                        DropdownMenuItem(
+                            text = { Text("${if (selected) "☑" else "☐"} ${option.label}") },
+                            onClick = {
+                                pendingStatusFilterIds = if (selected) {
+                                    pendingStatusFilterIds - option.id
+                                } else {
+                                    pendingStatusFilterIds + option.id
+                                }
+                            }
+                        )
+                    }
+                    DropdownMenuItem(
+                        text = { Text("清除状态筛选") },
+                        onClick = { pendingStatusFilterIds = emptySet() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("应用") },
+                        onClick = {
+                            onStatusFilterChange(pendingStatusFilterIds)
+                            statusFilterExpanded = false
+                        }
+                    )
+                }
+            }
+            Box {
                 OutlinedButton(onClick = { sortExpanded = true }) {
                     Text("排序：${sortMode.label}")
                 }

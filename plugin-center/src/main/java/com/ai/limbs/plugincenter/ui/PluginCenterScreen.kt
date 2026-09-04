@@ -59,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
+import com.ai.limbs.plugincenter.runtime.DynamicSurfaceSnapshot
 import com.ai.limbs.plugincenter.runtime.PluginCenterRuntime
 import com.ai.limbs.plugincenter.runtime.PluginInstallOptions
 import com.ai.limbs.plugincenter.runtime.PluginUiContributionSnapshot
@@ -81,6 +82,15 @@ import org.json.JSONObject
 
 private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
 private const val CHILD_ONLINE_UPDATE_ROLE = "online_update"
+private const val PAGE_FILTER_TOOLBOX_ID = "builtin:toolbox"
+private const val PAGE_FILTER_NO_UI_ID = "builtin:no_ui"
+
+private enum class PluginStatusLight(val filterId: String) {
+    GREEN("status:green"),
+    YELLOW("status:yellow"),
+    RED("status:red"),
+    GRAY("status:gray")
+}
 
 private sealed interface AdminAction {
     data object OpenSettings : AdminAction
@@ -92,10 +102,19 @@ private class PluginCenterHomeSessionState {
     var searchInput by mutableStateOf("")
     var appliedQuery by mutableStateOf("")
     var sortMode by mutableStateOf(PluginSortMode.NAME_ASC)
+    var selectedPageFilterIds by mutableStateOf<Set<String>>(emptySet())
+    var selectedStatusFilterIds by mutableStateOf<Set<String>>(emptySet())
     var systemExpanded by mutableStateOf(false)
     var installedExpanded by mutableStateOf(false)
     var expandedParentIds by mutableStateOf<Set<String>>(emptySet())
 }
+
+private data class PluginCenterRefreshSnapshot(
+    val plugins: List<PluginControlSnapshot>,
+    val children: ChildExtensionInventory,
+    val contributions: List<PluginUiContributionSnapshot>,
+    val dynamicSurfaces: List<DynamicSurfaceSnapshot>
+)
 @Composable
 fun PluginCenterScreen(
     onBack: () -> Unit,
@@ -110,6 +129,7 @@ fun PluginCenterScreen(
     var snapshots by remember { mutableStateOf<List<PluginControlSnapshot>>(emptyList()) }
     var childInventory by remember { mutableStateOf(ChildExtensionInventory(false, emptyList())) }
     var uiContributions by remember { mutableStateOf<List<PluginUiContributionSnapshot>>(emptyList()) }
+    var dynamicSurfaces by remember { mutableStateOf<List<DynamicSurfaceSnapshot>>(emptyList()) }
     var candidates by remember { mutableStateOf<List<PluginImportCandidate>>(emptyList()) }
     var updateTargetId by remember { mutableStateOf<String?>(null) }
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
@@ -130,15 +150,17 @@ fun PluginCenterScreen(
 
     suspend fun refresh() {
         val refreshed = withContext(Dispatchers.IO) {
-            Triple(
-                controlPlane.snapshots(),
-                controlPlane.childExtensionInventory(),
-                navigation.contributions()
+            PluginCenterRefreshSnapshot(
+                plugins = controlPlane.snapshots(),
+                children = controlPlane.childExtensionInventory(),
+                contributions = navigation.contributions(),
+                dynamicSurfaces = navigation.surfaces()
             )
         }
-        snapshots = refreshed.first
-        childInventory = refreshed.second
-        uiContributions = refreshed.third
+        snapshots = refreshed.plugins
+        childInventory = refreshed.children
+        uiContributions = refreshed.contributions
+        dynamicSurfaces = refreshed.dynamicSurfaces
     }
 
     fun showError(error: Throwable) {
@@ -386,6 +408,7 @@ fun PluginCenterScreen(
                     snapshots = snapshots,
                     childInventory = childInventory,
                     uiContributions = uiContributions,
+                    dynamicSurfaces = dynamicSurfaces,
                     jumpHostAvailable = controlPlane.hostPrimitiveAvailability(
                         "host.ui.surface@1",
                         "open"
@@ -600,6 +623,7 @@ private fun PluginCenterHome(
     snapshots: List<PluginControlSnapshot>,
     childInventory: ChildExtensionInventory,
     uiContributions: List<PluginUiContributionSnapshot>,
+    dynamicSurfaces: List<DynamicSurfaceSnapshot>,
     jumpHostAvailable: Boolean,
     candidates: List<PluginImportCandidate>,
     busy: Boolean,
@@ -632,15 +656,57 @@ private fun PluginCenterHome(
     val childrenByParent = remember(childInventory) {
         childInventory.extensions.groupBy { it.parentPluginId }
     }
-    val jumpablePluginIds = remember(uiContributions) {
-        uiContributions.filter { it.screenActive }.mapTo(mutableSetOf()) { it.ownerPluginId }
+    val activeContributionsByPlugin = remember(uiContributions) {
+        uiContributions.filter { it.screenActive }.groupBy { it.ownerPluginId }
     }
+    val jumpablePluginIds = remember(activeContributionsByPlugin) { activeContributionsByPlugin.keys }
+    val pageFilterOptions = remember(dynamicSurfaces) {
+        buildList {
+            add(PluginPageFilterOption(PAGE_FILTER_TOOLBOX_ID, "工具箱"))
+            dynamicSurfaces.forEachIndexed { index, surface ->
+                val sequence = (index + 1).toString().padStart(2, '0')
+                val title = surface.title.trim()
+                val generatedPlaceholder = Regex("新页面 \\d+").matches(title)
+                add(
+                    PluginPageFilterOption(
+                        id = surface.surfaceId,
+                        label = if (title.isBlank() || generatedPlaceholder) "新增页面 $sequence" else title
+                    )
+                )
+            }
+            add(PluginPageFilterOption(PAGE_FILTER_NO_UI_ID, "无界面 / 后台插件"))
+        }
+    }
+    val validPageFilterIds = remember(pageFilterOptions) { pageFilterOptions.mapTo(linkedSetOf()) { it.id } }
+    LaunchedEffect(validPageFilterIds) {
+        session.selectedPageFilterIds = session.selectedPageFilterIds.intersect(validPageFilterIds)
+    }
+    val selectedPageFilterIds = session.selectedPageFilterIds.intersect(validPageFilterIds)
+    val statusFilterOptions = remember {
+        listOf(
+            PluginStatusFilterOption(PluginStatusLight.RED.filterId, "🔴 红灯 · 故障"),
+            PluginStatusFilterOption(PluginStatusLight.YELLOW.filterId, "🟡 黄灯 · 注意 / 过渡状态"),
+            PluginStatusFilterOption(PluginStatusLight.GREEN.filterId, "🟢 绿灯 · 正常运行"),
+            PluginStatusFilterOption(PluginStatusLight.GRAY.filterId, "⚪ 灰灯 · 已禁用")
+        )
+    }
+    val validStatusFilterIds = remember { statusFilterOptions.mapTo(linkedSetOf()) { it.id } }
+    val selectedStatusFilterIds = session.selectedStatusFilterIds.intersect(validStatusFilterIds)
     val normalizedQuery = session.appliedQuery.trim().lowercase()
     val systemParents = remember(snapshots) { snapshots.filter(::isSystemPlugin) }
     val installedParents = remember(snapshots) { snapshots.filterNot(::isSystemPlugin) }
-    val visibleSystemParents = filterParentPluginsWithChildren(systemParents, childrenByParent, normalizedQuery, session.sortMode)
-    val visibleInstalledParents = filterParentPluginsWithChildren(installedParents, childrenByParent, normalizedQuery, session.sortMode)
+    val filteredSystemParents = systemParents.filter { snapshot ->
+        pluginMatchesPageFilter(snapshot.plugin.pluginId, selectedPageFilterIds, activeContributionsByPlugin) &&
+            pluginMatchesStatusFilter(snapshot, selectedStatusFilterIds)
+    }
+    val filteredInstalledParents = installedParents.filter { snapshot ->
+        pluginMatchesPageFilter(snapshot.plugin.pluginId, selectedPageFilterIds, activeContributionsByPlugin) &&
+            pluginMatchesStatusFilter(snapshot, selectedStatusFilterIds)
+    }
+    val visibleSystemParents = filterParentPluginsWithChildren(filteredSystemParents, childrenByParent, normalizedQuery, session.sortMode)
+    val visibleInstalledParents = filterParentPluginsWithChildren(filteredInstalledParents, childrenByParent, normalizedQuery, session.sortMode)
     val searching = normalizedQuery.isNotBlank()
+    val narrowing = searching || selectedPageFilterIds.isNotEmpty() || selectedStatusFilterIds.isNotEmpty()
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -652,7 +718,7 @@ private fun PluginCenterHome(
             item(key = "plugin-center-header") {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        "Plugin Center",
+                        "AI Limbs 总控台",
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
@@ -677,12 +743,18 @@ private fun PluginCenterHome(
                     input = session.searchInput,
                     appliedQuery = session.appliedQuery,
                     sortMode = session.sortMode,
+                    pageFilterOptions = pageFilterOptions,
+                    selectedPageFilterIds = selectedPageFilterIds,
+                    statusFilterOptions = statusFilterOptions,
+                    selectedStatusFilterIds = selectedStatusFilterIds,
                     onInputChange = { session.searchInput = it },
                     onApplySearch = { session.appliedQuery = session.searchInput.trim() },
                     onClearSearch = {
                         session.searchInput = ""
                         session.appliedQuery = ""
                     },
+                    onPageFilterChange = { session.selectedPageFilterIds = it },
+                    onStatusFilterChange = { session.selectedStatusFilterIds = it },
                     onSortModeChange = { session.sortMode = it }
                 )
             }
@@ -693,7 +765,7 @@ private fun PluginCenterHome(
                     expanded = session.systemExpanded,
                     matchedCount = visibleSystemParents.size,
                     totalCount = systemParents.size,
-                    searching = searching,
+                    searching = narrowing,
                     onToggle = { session.systemExpanded = !session.systemExpanded }
                 )
             }
@@ -701,7 +773,7 @@ private fun PluginCenterHome(
                 if (visibleSystemParents.isEmpty()) {
                     item(key = "system-empty") {
                         Text(
-                            if (searching) "系统插件中没有搜索结果" else "当前为空",
+                            if (narrowing) "系统插件中没有匹配结果" else "当前为空",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -769,7 +841,7 @@ private fun PluginCenterHome(
                     expanded = session.installedExpanded,
                     matchedCount = visibleInstalledParents.size,
                     totalCount = installedParents.size,
-                    searching = searching,
+                    searching = narrowing,
                     onToggle = { session.installedExpanded = !session.installedExpanded }
                 )
             }
@@ -777,7 +849,7 @@ private fun PluginCenterHome(
                 if (visibleInstalledParents.isEmpty()) {
                     item(key = "installed-empty") {
                         Text(
-                            if (searching) "已安装插件中没有搜索结果" else "当前为空",
+                            if (narrowing) "已安装插件中没有匹配结果" else "当前为空",
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
@@ -1078,6 +1150,46 @@ private fun filterParentPluginsWithChildren(
     )
 }
 
+/*
+ * Page filter identity is never a visible page number or title. Toolbox membership comes from the
+ * active Home Tile contract; dynamic-page membership comes from stable surfaceIds. When Host later
+ * exposes plugin bindings for more built-in pages (chat, settings, and so on), extend this mapping
+ * with their stable identities instead of inferring membership from display text.
+ */
+private fun pluginMatchesPageFilter(
+    pluginId: String,
+    selectedPageFilterIds: Set<String>,
+    activeContributionsByPlugin: Map<String, List<PluginUiContributionSnapshot>>
+): Boolean {
+    if (selectedPageFilterIds.isEmpty()) return true
+    val contributions = activeContributionsByPlugin[pluginId].orEmpty()
+    return selectedPageFilterIds.any { pageId ->
+        when (pageId) {
+            PAGE_FILTER_TOOLBOX_ID -> contributions.isNotEmpty()
+            PAGE_FILTER_NO_UI_ID -> contributions.isEmpty()
+            else -> contributions.any { pageId in it.surfaceIds }
+        }
+    }
+}
+
+private fun pluginMatchesStatusFilter(
+    snapshot: PluginControlSnapshot,
+    selectedStatusFilterIds: Set<String>
+): Boolean {
+    if (selectedStatusFilterIds.isEmpty()) return true
+    return pluginStatusLight(snapshot).filterId in selectedStatusFilterIds
+}
+
+private fun pluginStatusLight(snapshot: PluginControlSnapshot): PluginStatusLight {
+    val state = snapshot.plugin.persistentState
+    return when {
+        state?.enabled == false || state?.lastState == PluginLifecycleState.DISABLED -> PluginStatusLight.GRAY
+        snapshot.health == PluginHealthState.FAILED || state?.lastState == PluginLifecycleState.FAILED -> PluginStatusLight.RED
+        state?.lastState == PluginLifecycleState.ACTIVE -> PluginStatusLight.GREEN
+        else -> PluginStatusLight.YELLOW
+    }
+}
+
 private fun childMatchesQuery(child: ChildExtensionSummary, normalizedQuery: String): Boolean {
     if (normalizedQuery.isBlank()) return true
     return listOf(
@@ -1176,12 +1288,11 @@ private fun ChildExtensionCard(
 
 @Composable
 private fun StatusDot(snapshot: PluginControlSnapshot) {
-    val state = snapshot.plugin.persistentState
-    val color = when {
-        state?.enabled == false || state?.lastState == PluginLifecycleState.DISABLED -> Color(0xFF757575)
-        snapshot.health == PluginHealthState.FAILED || state?.lastState == PluginLifecycleState.FAILED -> Color(0xFFD32F2F)
-        state?.lastState == PluginLifecycleState.ACTIVE -> Color(0xFF00C853)
-        else -> Color(0xFFFFB300)
+    val color = when (pluginStatusLight(snapshot)) {
+        PluginStatusLight.GRAY -> Color(0xFF757575)
+        PluginStatusLight.RED -> Color(0xFFD32F2F)
+        PluginStatusLight.GREEN -> Color(0xFF00C853)
+        PluginStatusLight.YELLOW -> Color(0xFFFFB300)
     }
     Box(modifier = Modifier.size(11.dp).background(color, CircleShape))
 }
@@ -1207,7 +1318,7 @@ private fun PluginDetail(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        TextButton(onClick = onBack) { Text("← 返回 Plugin Center") }
+        TextButton(onClick = onBack) { Text("← 插件管理") }
         Row(verticalAlignment = Alignment.CenterVertically) {
             StatusDot(snapshot)
             Spacer(Modifier.size(10.dp))
