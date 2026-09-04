@@ -1028,12 +1028,12 @@ private fun PluginCard(
                 } else {
                     TextButton(onClick = onEnable) { Text("启用") }
                 }
-                TextButton(onClick = onOnlineUpgrade, enabled = parentOnlineUpgradeAvailable(snapshot)) { Text("在线升级") }
+                TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
                 TextButton(onClick = onUpdate) { Text("升级") }
+                TextButton(onClick = onOnlineUpgrade, enabled = parentOnlineUpgradeAvailable(snapshot)) { Text("在线升级") }
                 if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
                     DangerTextButton(onClick = onUninstall) { Text("卸载") }
                 }
-                TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
             }
         }
     }
@@ -1165,10 +1165,10 @@ private fun ChildExtensionCard(
                 } else {
                     TextButton(onClick = onEnable) { Text("启用") }
                 }
-                TextButton(onClick = onOnlineUpgrade, enabled = onlineUpgradeEnabled) { Text("在线升级") }
-                TextButton(onClick = onUpgrade) { Text("升级") }
-                DangerTextButton(onClick = onUninstall) { Text("卸载") }
                 TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
+                TextButton(onClick = onUpgrade) { Text("升级") }
+                TextButton(onClick = onOnlineUpgrade, enabled = onlineUpgradeEnabled) { Text("在线升级") }
+                DangerTextButton(onClick = onUninstall) { Text("卸载") }
             }
         }
     }
