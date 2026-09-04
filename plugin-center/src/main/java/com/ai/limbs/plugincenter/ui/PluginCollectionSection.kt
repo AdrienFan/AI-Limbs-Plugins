@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -25,6 +26,7 @@ internal fun PluginCollectionSection(
     onExpandedChange: (Boolean) -> Unit,
     searchPlaceholder: String = "搜索插件",
     headerControl: (@Composable () -> Unit)? = null,
+    searchActions: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -47,6 +49,7 @@ internal fun PluginCollectionSection(
                 placeholder = { Text(searchPlaceholder) },
                 singleLine = true
             )
+            searchActions?.invoke(this)
         }
         if (query.isNotBlank()) {
             Text(

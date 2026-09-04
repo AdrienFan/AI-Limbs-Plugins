@@ -1,5 +1,6 @@
 package com.ai.limbs.plugincenter.ui
 
+import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -44,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -255,10 +257,12 @@ internal fun PluginAdminSecurityScreen(
     var backupsExpanded by remember { mutableStateOf(false) }
     var backupQuery by remember { mutableStateOf("") }
     var selectedBackupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var backupExportFeedback by remember { mutableStateOf<String?>(null) }
     var childBackups by remember { mutableStateOf<List<ChildExtensionBackupSnapshot>>(emptyList()) }
     var childBackupsExpanded by remember { mutableStateOf(false) }
     var childBackupQuery by remember { mutableStateOf("") }
     var selectedChildBackupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var childBackupExportFeedback by remember { mutableStateOf<String?>(null) }
     var pluginDisplayNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var installedPluginIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var busy by remember { mutableStateOf(false) }
@@ -275,6 +279,7 @@ internal fun PluginAdminSecurityScreen(
     var onlineUpdateStatus by remember { mutableStateOf(OnlineUpdateStatus()) }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
 
     fun returnToToolbox(message: String) {
         navigator.backToToolbox(message)
@@ -286,6 +291,41 @@ internal fun PluginAdminSecurityScreen(
             busy = true
             runCatching { selfMaintenance.stageUpgrade(uri.toString()) }
                 .onSuccess { returnToToolbox("Plugin Center 升级已开始，请重新打开") }
+                .onFailure(onError)
+            busy = false
+        }
+    }
+
+    fun persistExportTree(uri: android.net.Uri) {
+        runCatching {
+            context.contentResolver.takePersistableUriPermission(
+                uri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        }
+    }
+
+    val pluginBackupExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null || selectedBackupIds.isEmpty()) return@rememberLauncherForActivityResult
+        persistExportTree(uri)
+        val ids = selectedBackupIds.toList()
+        scope.launch {
+            busy = true
+            runCatching { withContext(Dispatchers.IO) { controlPlane.exportBackups(ids, uri.toString()) } }
+                .onSuccess { files -> backupExportFeedback = "已导出 ${files.size} 个插件备份" }
+                .onFailure(onError)
+            busy = false
+        }
+    }
+
+    val childBackupExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri == null || selectedChildBackupIds.isEmpty()) return@rememberLauncherForActivityResult
+        persistExportTree(uri)
+        val ids = selectedChildBackupIds.toList()
+        scope.launch {
+            busy = true
+            runCatching { withContext(Dispatchers.IO) { controlPlane.exportChildBackups(ids, uri.toString()) } }
+                .onSuccess { files -> childBackupExportFeedback = "已导出 ${files.size} 个子插件备份" }
                 .onFailure(onError)
             busy = false
         }
@@ -796,18 +836,8 @@ internal fun PluginAdminSecurityScreen(
                 onQueryChange = { backupQuery = it },
                 expanded = backupsExpanded,
                 onExpandedChange = { backupsExpanded = it },
-                searchPlaceholder = "搜索备份插件"
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "已选择 ${selectedBackupIds.size} 个",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                searchPlaceholder = "搜索备份插件",
+                searchActions = {
                     OutlinedButton(
                         enabled = !busy && filteredBackups.isNotEmpty(),
                         onClick = {
@@ -817,17 +847,15 @@ internal fun PluginAdminSecurityScreen(
                                 selectedBackupIds + filteredBackupIds
                             }
                         }
-                    ) {
-                        Text(
-                            when {
-                                normalizedBackupQuery.isBlank() && allFilteredBackupsSelected -> "取消全选"
-                                normalizedBackupQuery.isBlank() -> "全选"
-                                allFilteredBackupsSelected -> "取消选择结果"
-                                else -> "全选结果"
-                            }
-                        )
-                    }
+                    ) { Text(if (allFilteredBackupsSelected) "取消全选" else "全选") }
+                    OutlinedButton(
+                        enabled = !busy && selectedBackupIds.isNotEmpty(),
+                        onClick = { pluginBackupExportLauncher.launch(null) }
+                    ) { Text("导出") }
                 }
+            ) {
+                Text("已选择 ${selectedBackupIds.size} 个", style = MaterialTheme.typography.bodySmall)
+                backupExportFeedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         enabled = !busy && selectedRestorableBackupIds.isNotEmpty(),
@@ -878,18 +906,8 @@ internal fun PluginAdminSecurityScreen(
                 onQueryChange = { childBackupQuery = it },
                 expanded = childBackupsExpanded,
                 onExpandedChange = { childBackupsExpanded = it },
-                searchPlaceholder = "搜索备份子插件"
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        "已选择 ${selectedChildBackupIds.size} 个",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.bodySmall
-                    )
+                searchPlaceholder = "搜索备份子插件",
+                searchActions = {
                     OutlinedButton(
                         enabled = !busy && filteredChildBackups.isNotEmpty(),
                         onClick = {
@@ -899,17 +917,15 @@ internal fun PluginAdminSecurityScreen(
                                 selectedChildBackupIds + filteredChildBackupIds
                             }
                         }
-                    ) {
-                        Text(
-                            when {
-                                normalizedChildBackupQuery.isBlank() && allFilteredChildBackupsSelected -> "取消全选"
-                                normalizedChildBackupQuery.isBlank() -> "全选"
-                                allFilteredChildBackupsSelected -> "取消选择结果"
-                                else -> "全选结果"
-                            }
-                        )
-                    }
+                    ) { Text(if (allFilteredChildBackupsSelected) "取消全选" else "全选") }
+                    OutlinedButton(
+                        enabled = !busy && selectedChildBackupIds.isNotEmpty(),
+                        onClick = { childBackupExportLauncher.launch(null) }
+                    ) { Text("导出") }
                 }
+            ) {
+                Text("已选择 ${selectedChildBackupIds.size} 个", style = MaterialTheme.typography.bodySmall)
+                childBackupExportFeedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         enabled = !busy && selectedRestorableChildBackupIds.isNotEmpty(),

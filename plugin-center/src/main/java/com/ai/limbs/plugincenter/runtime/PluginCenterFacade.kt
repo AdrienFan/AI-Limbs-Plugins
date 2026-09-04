@@ -19,6 +19,7 @@ internal data class PluginInstallOptions(
 
 private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
 private const val CHILD_ONLINE_UPDATE_ROLE = "online_update"
+private const val EXTENSION_HUB_BACKUP_EXPORT_CAPABILITY = "plugin.extension_hub.export_backups"
 
 internal class PluginControlPlaneFacade(
     private val host: SystemPluginHostV2
@@ -119,6 +120,18 @@ internal class PluginControlPlaneFacade(
 
     suspend fun deleteChildBackup(extensionId: String) {
         check(requireExtensionHub().deleteBackup(extensionId)) { "子插件备份不存在：$extensionId" }
+    }
+
+    suspend fun exportChildBackups(extensionIds: Collection<String>, treeUri: String): List<String> {
+        require(extensionIds.isNotEmpty()) { "至少选择一个子插件备份" }
+        val result = host.delegatedCapabilities.invokeAsActivePlugin(
+            InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID,
+            EXTENSION_HUB_BACKUP_EXPORT_CAPABILITY,
+            JSONObject()
+                .put("extension_ids", JSONArray(extensionIds.distinct().sorted()))
+                .put("tree_uri", treeUri)
+        )
+        return result.optJSONArray("files").strings()
     }
 
     fun canOnlineUpgrade(snapshot: PluginControlSnapshot): Boolean {
@@ -303,6 +316,17 @@ internal class PluginControlPlaneFacade(
 
     suspend fun deleteBackup(pluginId: String) {
         service.call("delete_backup", JSONObject().put("plugin_id", pluginId))
+    }
+
+    suspend fun exportBackups(pluginIds: Collection<String>, treeUri: String): List<String> {
+        require(pluginIds.isNotEmpty()) { "至少选择一个插件备份" }
+        val result = service.call(
+            "export_backups",
+            JSONObject()
+                .put("plugin_ids", JSONArray(pluginIds.distinct().sorted()))
+                .put("tree_uri", treeUri)
+        )
+        return result.optJSONArray("files").strings()
     }
 }
 
