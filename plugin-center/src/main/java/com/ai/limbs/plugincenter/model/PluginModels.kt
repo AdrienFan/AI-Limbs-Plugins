@@ -85,6 +85,7 @@ data class ChildExtensionSummary(
     val apiVersion: Int,
     val lifecycle: String,
     val enabled: Boolean,
+    val roles: Set<String> = emptySet(),
     val useCount: Long,
     val lastError: String?,
     val backupVersion: String?
@@ -168,6 +169,11 @@ data class PluginImportCandidate(
     val sourceName: String,
     val manifest: PluginManifest,
     val updateTargetId: String? = null
+)
+data class OnlineUpdateStatus(
+    val available: Boolean = false,
+    val enabled: Boolean = false,
+    val reason: String? = null
 )
 data class SelfMaintenanceStatus(
     val installedVersion: String?,

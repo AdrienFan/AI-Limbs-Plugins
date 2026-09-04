@@ -7,12 +7,17 @@ import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugincenter.model.*
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
+import java.util.zip.ZipFile
 
 internal data class PluginInstallOptions(
     val allowUntrustedForDevelopment: Boolean = false,
     val enableAfterInstall: Boolean = false,
     val approvedScopes: Set<String> = emptySet()
 )
+
+private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
+private const val CHILD_ONLINE_UPDATE_ROLE = "online_update"
 
 internal class PluginControlPlaneFacade(
     private val host: SystemPluginHostV2
@@ -87,6 +92,7 @@ internal class PluginControlPlaneFacade(
                     apiVersion = child.target.apiVersion,
                     lifecycle = child.lifecycle.name,
                     enabled = child.enabled,
+                    roles = child.roles,
                     useCount = child.useCount,
                     lastError = child.lastError,
                     backupVersion = backups[child.extensionId]?.version
@@ -101,6 +107,64 @@ internal class PluginControlPlaneFacade(
 
     suspend fun backupChildExtension(extensionId: String) {
         requireExtensionHub().backup(extensionId)
+    }
+
+    fun canOnlineUpgrade(snapshot: PluginControlSnapshot): Boolean {
+        val manifest = snapshot.plugin.activeManifest ?: return false
+        val state = snapshot.plugin.persistentState ?: return false
+        manifest.provides.capabilities.singleOrNull { it.endsWith(".online_update") } ?: return false
+        return state.enabled && state.lastState == PluginLifecycleState.ACTIVE
+    }
+
+    suspend fun onlineUpgrade(snapshot: PluginControlSnapshot) {
+        check(canOnlineUpgrade(snapshot)) { "插件未声明可用的在线升级能力" }
+        val pluginId = snapshot.plugin.pluginId
+        val capabilityId = snapshot.plugin.activeManifest?.provides?.capabilities
+            ?.singleOrNull { it.endsWith(".online_update") }
+            ?: error("在线升级 capability 不唯一或不存在")
+        host.delegatedCapabilities.invokeAsActivePlugin(pluginId, capabilityId, JSONObject())
+    }
+
+    fun canOnlineUpgradeChild(child: ChildExtensionSummary, parent: PluginControlSnapshot?): Boolean {
+        val parentSnapshot = parent ?: return false
+        val parentManifest = parentSnapshot.plugin.activeManifest ?: return false
+        val parentState = parentSnapshot.plugin.persistentState ?: return false
+        parentManifest.provides.capabilities
+            .singleOrNull { it.endsWith(".child_online_update") } ?: return false
+        return child.enabled && child.lifecycle == "ACTIVE" && CHILD_ONLINE_UPDATE_ROLE in child.roles &&
+            parentState.enabled && parentState.lastState == PluginLifecycleState.ACTIVE
+    }
+
+    suspend fun onlineUpgradeChild(child: ChildExtensionSummary, parent: PluginControlSnapshot) {
+        check(canOnlineUpgradeChild(child, parent)) { "子插件或父插件未声明可用的在线升级能力" }
+        val capabilityId = parent.plugin.activeManifest?.provides?.capabilities
+            ?.singleOrNull { it.endsWith(".child_online_update") }
+            ?: error("父插件未声明唯一的 child_online_update capability")
+        host.delegatedCapabilities.invokeAsActivePlugin(
+            child.parentPluginId,
+            capabilityId,
+            JSONObject().put("extension_id", child.extensionId)
+                .put("current_version", child.version)
+                .put("extension_point", child.point)
+        )
+    }
+
+    suspend fun upgradeChildExtension(packageFile: File, target: ChildExtensionSummary) {
+        require(packageFile.isFile && packageFile.name.lowercase().endsWith(".ailx")) {
+            "升级需要 .ailx 安装包"
+        }
+        val manifest = ZipFile(packageFile).use { zip ->
+            val entry = zip.getEntry("extension.json") ?: error(".ailx 缺少 extension.json")
+            zip.getInputStream(entry).bufferedReader().use { JSONObject(it.readText()) }
+        }
+        require(manifest.optString("format") == "AIL_EXTENSION_V1") { "不是 AIL_EXTENSION_V1 安装包" }
+        require(manifest.optString("extension_id") == target.extensionId) { "升级包 extension_id 与目标子插件不一致" }
+        val targetJson = manifest.optJSONObject("target") ?: error("升级包缺少 target")
+        require(targetJson.optString("plugin_id") == target.parentPluginId) { "升级包父插件目标不一致" }
+        require(targetJson.optString("extension_point") == target.point) { "升级包扩展点不一致" }
+        require(targetJson.optInt("api", -1) == target.apiVersion) { "升级包 API 版本不一致" }
+        val installed = requireExtensionHub().install(packageFile, target.parentPluginId, target.point)
+        check(installed.extensionId == target.extensionId) { "Hub 返回的子插件身份不一致" }
     }
 
     suspend fun uninstallChildExtension(extensionId: String) {
@@ -144,6 +208,7 @@ internal class PluginControlPlaneFacade(
     }
 
     suspend fun uninstall(pluginId: String, removeData: Boolean = false, adminAuthorized: Boolean = false) {
+        check(pluginId != EXTENSION_HUB_PLUGIN_ID) { "Plugin Extension Hub 是基础插件，不能卸载" }
         service.call("uninstall", JSONObject()
             .put("plugin_id", pluginId)
             .put("remove_data", removeData)
@@ -376,6 +441,19 @@ internal class SelfMaintenanceFacade(
             canRollback = json.optBoolean("can_rollback")
         )
     }
+    suspend fun onlineUpdateStatus(): OnlineUpdateStatus = runCatching {
+        val json = service.call("online_update_status")
+        OnlineUpdateStatus(
+            available = json.optBoolean("available"),
+            enabled = json.optBoolean("enabled"),
+            reason = json.optNullableString("reason")
+        )
+    }.getOrElse { OnlineUpdateStatus(reason = "ONLINE_UPDATE_STATUS_UNAVAILABLE") }
+
+    suspend fun onlineUpdate() {
+        service.call("online_update")
+    }
+
     suspend fun stageUpgrade(uri: String, sourceName: String? = null) {
         val params = JSONObject().put("uri", uri)
         sourceName?.takeIf { it.isNotBlank() }?.let { params.put("name", it) }

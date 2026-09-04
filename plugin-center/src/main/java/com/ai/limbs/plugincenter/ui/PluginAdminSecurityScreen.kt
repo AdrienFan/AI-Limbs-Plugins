@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
 import com.ai.limbs.plugincenter.model.AdminAuthFrequency
 import com.ai.limbs.plugincenter.model.SelfMaintenanceStatus
+import com.ai.limbs.plugincenter.model.OnlineUpdateStatus
 import com.ai.limbs.plugincenter.runtime.AdminSecurityFacade
 import com.ai.limbs.plugincenter.model.HostSurfaceKind
 import com.ai.limbs.plugincenter.model.HostSurfaceSnapshot
@@ -253,6 +254,7 @@ internal fun PluginAdminSecurityScreen(
     var maintenanceStatus by remember {
         mutableStateOf(SelfMaintenanceStatus(null, null, null, canRepair = false, canRollback = false))
     }
+    var onlineUpdateStatus by remember { mutableStateOf(OnlineUpdateStatus()) }
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
 
@@ -297,10 +299,15 @@ internal fun PluginAdminSecurityScreen(
         val initial = withContext(Dispatchers.IO) {
             controlPlane.refreshAdminState()
             adminSecurity.refresh()
-            Pair(controlPlane.backupSnapshots(), selfMaintenance.status())
+            Triple(
+                controlPlane.backupSnapshots(),
+                selfMaintenance.status(),
+                selfMaintenance.onlineUpdateStatus()
+            )
         }
         backups = initial.first
         maintenanceStatus = initial.second
+        onlineUpdateStatus = initial.third
         developerMode = controlPlane.developerModeEnabled()
         developerDiscovery = controlPlane.developerDiscoveryEnabled()
         primitives = controlPlane.hostPrimitiveSnapshots()
@@ -451,15 +458,23 @@ internal fun PluginAdminSecurityScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     OutlinedButton(
-                        onClick = {},
-                        enabled = false,
+                        onClick = {
+                            scope.launch {
+                                busy = true
+                                runCatching { selfMaintenance.onlineUpdate() }
+                                    .onSuccess { returnToToolbox("Plugin Center 在线升级已开始，请重新打开") }
+                                    .onFailure(onError)
+                                busy = false
+                            }
+                        },
+                        enabled = !busy && onlineUpdateStatus.available && onlineUpdateStatus.enabled,
                         modifier = Modifier.weight(1f)
-                    ) { Text("在线更新") }
+                    ) { Text("在线升级") }
                     OutlinedButton(
                         onClick = { upgradeLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
                         enabled = !busy,
                         modifier = Modifier.weight(1f)
-                    ) { Text("本地升级") }
+                    ) { Text("升级") }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -493,7 +508,11 @@ internal fun PluginAdminSecurityScreen(
                     ) { Text("回滚上一版") }
                 }
                 Text(
-                    "在线更新暂未开放。升级、修复或回滚由 AI Limbs Bootstrap 接管，随后返回工具箱重新加载 Plugin Center。",
+                    if (onlineUpdateStatus.available && onlineUpdateStatus.enabled) {
+                        "在线升级已配置；“升级”使用本地 .ailpsys 安装包。修复或回滚仍由 AI Limbs Bootstrap 接管。"
+                    } else {
+                        "在线升级不可用：${onlineUpdateStatus.reason ?: "未配置"}；“升级”使用本地 .ailpsys 安装包。"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -594,7 +613,7 @@ internal fun PluginAdminSecurityScreen(
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text("自动备份高频和系统插件", fontWeight = FontWeight.Bold)
                         Text(
-                            "系统插件始终属于自动备份对象；普通插件累计使用达到 ${PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT} 次后视为高频。只在当前版本尚未备份时创建备份；更新后会自动备份新版本。配置后即使关闭开发模式也会继续生效。",
+                            "系统插件始终属于自动备份对象；普通插件累计使用达到 ${PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT} 次后视为高频。只在当前版本尚未备份时创建备份；升级后会自动备份新版本。配置后即使关闭开发模式也会继续生效。",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }

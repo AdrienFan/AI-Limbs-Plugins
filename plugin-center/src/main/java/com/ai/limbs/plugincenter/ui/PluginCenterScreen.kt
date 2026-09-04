@@ -52,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,6 +69,11 @@ import com.ai.limbs.plugincenter.model.PluginImportCandidate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.io.File
+import java.util.UUID
+
+private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
+private const val CHILD_ONLINE_UPDATE_ROLE = "online_update"
 
 private sealed interface AdminAction {
     data object OpenSettings : AdminAction
@@ -102,6 +108,7 @@ fun PluginCenterScreen(
     var disableSystemTargetId by remember { mutableStateOf<String?>(null) }
     var uninstallTargetId by remember { mutableStateOf<String?>(null) }
     var uninstallChildTarget by remember { mutableStateOf<ChildExtensionSummary?>(null) }
+    var childUpgradeTarget by remember { mutableStateOf<ChildExtensionSummary?>(null) }
     var showAdminSettings by remember { mutableStateOf(false) }
     var pendingAdminAction by remember { mutableStateOf<AdminAction?>(null) }
     var showAdminSetup by remember { mutableStateOf(false) }
@@ -111,6 +118,7 @@ fun PluginCenterScreen(
     var busy by remember { mutableStateOf(false) }
     val homeSession = remember { PluginCenterHomeSessionState() }
     val homeListState = rememberLazyListState()
+    val context = LocalContext.current
 
     suspend fun refresh() {
         val (latestSnapshots, latestChildInventory) = withContext(Dispatchers.IO) {
@@ -208,6 +216,30 @@ fun PluginCenterScreen(
         }
     }
 
+    val childUpgradeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val target = childUpgradeTarget
+        childUpgradeTarget = null
+        if (uri == null || target == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            busy = true
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    val temporary = File(context.cacheDir, "child-upgrade-${UUID.randomUUID()}.ailx")
+                    try {
+                        context.contentResolver.openInputStream(uri).use { input ->
+                            requireNotNull(input) { "无法读取选择的子插件升级包" }
+                            temporary.outputStream().use(input::copyTo)
+                        }
+                        controlPlane.upgradeChildExtension(temporary, target)
+                    } finally {
+                        temporary.delete()
+                    }
+                }
+            }.onSuccess { refresh() }.onFailure(::showError)
+            busy = false
+        }
+    }
+
     fun choosePlugin(targetPluginId: String? = null) {
         val mimeTypes = arrayOf("application/zip", "application/octet-stream", "*/*")
         if (targetPluginId == null) {
@@ -216,6 +248,11 @@ fun PluginCenterScreen(
             updateTargetId = targetPluginId
             updateFileLauncher.launch(mimeTypes)
         }
+    }
+
+    fun chooseChildUpgrade(target: ChildExtensionSummary) {
+        childUpgradeTarget = target
+        childUpgradeLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
     }
 
     fun runMutation(block: suspend () -> Unit) {
@@ -262,6 +299,7 @@ fun PluginCenterScreen(
                     dependencySummary = dependencySummary(selected, snapshots, childInventory),
                     busy = busy,
                     onBack = { selectedPluginId = null },
+                    onOnlineUpgrade = { runMutation { controlPlane.onlineUpgrade(selected) } },
                     onEnable = { runMutation { controlPlane.enable(selected.plugin.pluginId) } },
                     onDisable = {
                         if (isSystemPlugin(selected)) {
@@ -271,7 +309,11 @@ fun PluginCenterScreen(
                         }
                     },
                     onUpdate = { choosePlugin(selected.plugin.pluginId) },
-                    onUninstall = { requestAdmin(AdminAction.Uninstall(selected.plugin.pluginId)) },
+                    onUninstall = {
+                        if (selected.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
+                            requestAdmin(AdminAction.Uninstall(selected.plugin.pluginId))
+                        }
+                    },
                     onBackup = { runMutation { controlPlane.backup(selected.plugin.pluginId) } },
                     onRollback = { runMutation { controlPlane.rollback(selected.plugin.pluginId) } }
                 )
@@ -295,7 +337,7 @@ fun PluginCenterScreen(
                             it.updateTargetId != null && it.updateTargetId != it.manifest.pluginId
                         }
                         if (mismatch != null) {
-                            showError(IllegalArgumentException("更新包的 plugin_id 与目标插件不一致"))
+                            showError(IllegalArgumentException("升级包的 plugin_id 与目标插件不一致"))
                         } else if (queue.isNotEmpty()) {
                             runMutation {
                                 queue.forEach { current ->
@@ -316,6 +358,7 @@ fun PluginCenterScreen(
                         }
                     },
                     onOpen = { selectedPluginId = it.plugin.pluginId },
+                    onOnlineUpgrade = { snapshot -> runMutation { controlPlane.onlineUpgrade(snapshot) } },
                     onEnable = { snapshot -> runMutation { controlPlane.enable(snapshot.plugin.pluginId) } },
                     onDisable = { snapshot ->
                         if (isSystemPlugin(snapshot)) {
@@ -325,8 +368,21 @@ fun PluginCenterScreen(
                         }
                     },
                     onUpdate = { snapshot -> choosePlugin(snapshot.plugin.pluginId) },
-                    onUninstall = { snapshot -> requestAdmin(AdminAction.Uninstall(snapshot.plugin.pluginId)) },
+                    onUninstall = { snapshot ->
+                        if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
+                            requestAdmin(AdminAction.Uninstall(snapshot.plugin.pluginId))
+                        }
+                    },
                     onBackup = { snapshot -> runMutation { controlPlane.backup(snapshot.plugin.pluginId) } },
+                    onOnlineUpgradeChild = { child ->
+                        val parent = snapshots.firstOrNull { it.plugin.pluginId == child.parentPluginId }
+                        if (parent == null) {
+                            showError(IllegalStateException("找不到子插件所属父插件：${child.parentPluginId}"))
+                        } else {
+                            runMutation { controlPlane.onlineUpgradeChild(child, parent) }
+                        }
+                    },
+                    onUpgradeChild = { child -> chooseChildUpgrade(child) },
                     onEnableChild = { child ->
                         runMutation { controlPlane.setChildExtensionEnabled(child.extensionId, true) }
                     },
@@ -482,11 +538,14 @@ private fun PluginCenterHome(
     onClearCandidates: () -> Unit,
     onRemoveCandidate: (PluginImportCandidate) -> Unit,
     onOpen: (PluginControlSnapshot) -> Unit,
+    onOnlineUpgrade: (PluginControlSnapshot) -> Unit,
     onEnable: (PluginControlSnapshot) -> Unit,
     onDisable: (PluginControlSnapshot) -> Unit,
     onUpdate: (PluginControlSnapshot) -> Unit,
     onUninstall: (PluginControlSnapshot) -> Unit,
     onBackup: (PluginControlSnapshot) -> Unit,
+    onOnlineUpgradeChild: (ChildExtensionSummary) -> Unit,
+    onUpgradeChild: (ChildExtensionSummary) -> Unit,
     onEnableChild: (ChildExtensionSummary) -> Unit,
     onDisableChild: (ChildExtensionSummary) -> Unit,
     onBackupChild: (ChildExtensionSummary) -> Unit,
@@ -596,6 +655,7 @@ private fun PluginCenterHome(
                                     }
                                 },
                                 onOpen = { onOpen(snapshot) },
+                                onOnlineUpgrade = { onOnlineUpgrade(snapshot) },
                                 onEnable = { onEnable(snapshot) },
                                 onDisable = { onDisable(snapshot) },
                                 onUpdate = { onUpdate(snapshot) },
@@ -606,6 +666,9 @@ private fun PluginCenterHome(
                                 visibleChildren.forEach { child ->
                                     ChildExtensionCard(
                                         child = child,
+                                        onlineUpgradeEnabled = childOnlineUpgradeAvailable(child, snapshot),
+                                        onOnlineUpgrade = { onOnlineUpgradeChild(child) },
+                                        onUpgrade = { onUpgradeChild(child) },
                                         onEnable = { onEnableChild(child) },
                                         onDisable = { onDisableChild(child) },
                                         onBackup = { onBackupChild(child) },
@@ -664,6 +727,7 @@ private fun PluginCenterHome(
                                     }
                                 },
                                 onOpen = { onOpen(snapshot) },
+                                onOnlineUpgrade = { onOnlineUpgrade(snapshot) },
                                 onEnable = { onEnable(snapshot) },
                                 onDisable = { onDisable(snapshot) },
                                 onUpdate = { onUpdate(snapshot) },
@@ -674,6 +738,9 @@ private fun PluginCenterHome(
                                 visibleChildren.forEach { child ->
                                     ChildExtensionCard(
                                         child = child,
+                                        onlineUpgradeEnabled = childOnlineUpgradeAvailable(child, snapshot),
+                                        onOnlineUpgrade = { onOnlineUpgradeChild(child) },
+                                        onUpgrade = { onUpgradeChild(child) },
                                         onEnable = { onEnableChild(child) },
                                         onDisable = { onDisableChild(child) },
                                         onBackup = { onBackupChild(child) },
@@ -792,6 +859,7 @@ private fun PluginCard(
     childExpanded: Boolean = false,
     onToggleChildren: (() -> Unit)? = null,
     onOpen: () -> Unit,
+    onOnlineUpgrade: () -> Unit,
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onUpdate: () -> Unit,
@@ -867,12 +935,33 @@ private fun PluginCard(
                 } else {
                     TextButton(onClick = onEnable) { Text("启用") }
                 }
-                TextButton(onClick = onUpdate) { Text("更新") }
-                DangerTextButton(onClick = onUninstall) { Text("卸载") }
+                TextButton(onClick = onOnlineUpgrade, enabled = parentOnlineUpgradeAvailable(snapshot)) { Text("在线升级") }
+                TextButton(onClick = onUpdate) { Text("升级") }
+                if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
+                    DangerTextButton(onClick = onUninstall) { Text("卸载") }
+                }
                 TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
             }
         }
     }
+}
+
+private fun parentOnlineUpgradeAvailable(snapshot: PluginControlSnapshot): Boolean {
+    val manifest = snapshot.plugin.activeManifest ?: return false
+    val state = snapshot.plugin.persistentState ?: return false
+    manifest.provides.capabilities.singleOrNull { it.endsWith(".online_update") } ?: return false
+    return state.enabled && state.lastState == PluginLifecycleState.ACTIVE
+}
+
+private fun childOnlineUpgradeAvailable(
+    child: ChildExtensionSummary,
+    parent: PluginControlSnapshot
+): Boolean {
+    val manifest = parent.plugin.activeManifest ?: return false
+    val state = parent.plugin.persistentState ?: return false
+    manifest.provides.capabilities.singleOrNull { it.endsWith(".child_online_update") } ?: return false
+    return child.enabled && child.lifecycle == "ACTIVE" && CHILD_ONLINE_UPDATE_ROLE in child.roles &&
+        state.enabled && state.lastState == PluginLifecycleState.ACTIVE
 }
 
 private fun filterParentPluginsWithChildren(
@@ -912,6 +1001,9 @@ private fun childMatchesQuery(child: ChildExtensionSummary, normalizedQuery: Str
 @Composable
 private fun ChildExtensionCard(
     child: ChildExtensionSummary,
+    onlineUpgradeEnabled: Boolean,
+    onOnlineUpgrade: () -> Unit,
+    onUpgrade: () -> Unit,
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onBackup: () -> Unit,
@@ -973,8 +1065,10 @@ private fun ChildExtensionCard(
                 } else {
                     TextButton(onClick = onEnable) { Text("启用") }
                 }
-                TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
+                TextButton(onClick = onOnlineUpgrade, enabled = onlineUpgradeEnabled) { Text("在线升级") }
+                TextButton(onClick = onUpgrade) { Text("升级") }
                 DangerTextButton(onClick = onUninstall) { Text("卸载") }
+                TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
             }
         }
     }
@@ -998,6 +1092,7 @@ private fun PluginDetail(
     dependencySummary: PluginDependencySummary,
     busy: Boolean,
     onBack: () -> Unit,
+    onOnlineUpgrade: () -> Unit,
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onUpdate: () -> Unit,
@@ -1058,8 +1153,14 @@ private fun PluginDetail(
             } else {
                 Button(onClick = onEnable, enabled = !busy) { Text("启用") }
             }
-            OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("更新") }
-            DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
+            OutlinedButton(
+                onClick = onOnlineUpgrade,
+                enabled = !busy && parentOnlineUpgradeAvailable(snapshot)
+            ) { Text("在线升级") }
+            OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("升级") }
+            if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
+                DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
+            }
             OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
         }
         Text("版本管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
