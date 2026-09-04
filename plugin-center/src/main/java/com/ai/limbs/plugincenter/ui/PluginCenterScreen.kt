@@ -59,6 +59,7 @@ import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
 import com.ai.limbs.plugincenter.runtime.PluginCenterRuntime
 import com.ai.limbs.plugincenter.runtime.PluginInstallOptions
 import com.ai.limbs.plugincenter.model.ChildExtensionInventory
+import com.ai.limbs.plugincenter.model.ChildExtensionSummary
 import com.ai.limbs.plugincenter.model.PluginControlSnapshot
 import com.ai.limbs.plugincenter.model.PluginHealthState
 import com.ai.limbs.plugincenter.model.PluginLifecycleState
@@ -91,6 +92,7 @@ fun PluginCenterScreen(
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
     var disableSystemTargetId by remember { mutableStateOf<String?>(null) }
     var uninstallTargetId by remember { mutableStateOf<String?>(null) }
+    var uninstallChildTarget by remember { mutableStateOf<ChildExtensionSummary?>(null) }
     var showAdminSettings by remember { mutableStateOf(false) }
     var pendingAdminAction by remember { mutableStateOf<AdminAction?>(null) }
     var showAdminSetup by remember { mutableStateOf(false) }
@@ -311,7 +313,17 @@ fun PluginCenterScreen(
                     },
                     onUpdate = { snapshot -> choosePlugin(snapshot.plugin.pluginId) },
                     onUninstall = { snapshot -> requestAdmin(AdminAction.Uninstall(snapshot.plugin.pluginId)) },
-                    onBackup = { snapshot -> runMutation { controlPlane.backup(snapshot.plugin.pluginId) } }
+                    onBackup = { snapshot -> runMutation { controlPlane.backup(snapshot.plugin.pluginId) } },
+                    onEnableChild = { child ->
+                        runMutation { controlPlane.setChildExtensionEnabled(child.extensionId, true) }
+                    },
+                    onDisableChild = { child ->
+                        runMutation { controlPlane.setChildExtensionEnabled(child.extensionId, false) }
+                    },
+                    onBackupChild = { child ->
+                        runMutation { controlPlane.backupChildExtension(child.extensionId) }
+                    },
+                    onUninstallChild = { child -> uninstallChildTarget = child }
                 )
             }
             if (busy) {
@@ -363,6 +375,21 @@ fun PluginCenterScreen(
                 }) { Text("卸载") }
             },
             dismissButton = { TextButton(onClick = { uninstallTargetId = null }) { Text("取消") } }
+        )
+    }
+
+    uninstallChildTarget?.let { child ->
+        AlertDialog(
+            onDismissRequest = { uninstallChildTarget = null },
+            title = { Text("卸载子插件") },
+            text = { Text("确定卸载 ${child.displayName}（${child.extensionId}）？子插件长期数据默认保留。") },
+            confirmButton = {
+                DangerTextButton(onClick = {
+                    uninstallChildTarget = null
+                    runMutation { controlPlane.uninstallChildExtension(child.extensionId) }
+                }) { Text("卸载") }
+            },
+            dismissButton = { TextButton(onClick = { uninstallChildTarget = null }) { Text("取消") } }
         )
     }
 
@@ -444,27 +471,48 @@ private fun PluginCenterHome(
     onDisable: (PluginControlSnapshot) -> Unit,
     onUpdate: (PluginControlSnapshot) -> Unit,
     onUninstall: (PluginControlSnapshot) -> Unit,
-    onBackup: (PluginControlSnapshot) -> Unit
+    onBackup: (PluginControlSnapshot) -> Unit,
+    onEnableChild: (ChildExtensionSummary) -> Unit,
+    onDisableChild: (ChildExtensionSummary) -> Unit,
+    onBackupChild: (ChildExtensionSummary) -> Unit,
+    onUninstallChild: (ChildExtensionSummary) -> Unit
 ) {
     var searchInput by remember { mutableStateOf("") }
     var appliedQuery by remember { mutableStateOf("") }
     var sortMode by remember { mutableStateOf(PluginSortMode.NAME_ASC) }
-    var systemExpanded by remember { mutableStateOf(false) }
     var installedExpanded by remember { mutableStateOf(false) }
+    var expandedParentIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     val listState = rememberLazyListState()
     val dependencySummaries = remember(snapshots, childInventory) {
         snapshots.associate { it.plugin.pluginId to dependencySummary(it, snapshots, childInventory) }
     }
 
-    val allSystemPlugins = remember(snapshots) { snapshots.filter(::isSystemPlugin) }
-    val allInstalledPlugins = remember(snapshots) { snapshots.filterNot(::isSystemPlugin) }
-    val systemPlugins = remember(allSystemPlugins, appliedQuery, sortMode) {
-        filterAndSortPlugins(allSystemPlugins, appliedQuery, sortMode)
+    // This control plane owns ordinary .ailp parents. .ailpsys system-plugin lifecycle
+    // is outside this parent-plugin inventory, so do not present trusted parents as system plugins.
+    val allInstalledPlugins = remember(snapshots) { snapshots }
+    val childrenByParent = remember(childInventory) {
+        childInventory.extensions.groupBy { it.parentPluginId }
     }
-    val installedPlugins = remember(allInstalledPlugins, appliedQuery, sortMode) {
-        filterAndSortPlugins(allInstalledPlugins, appliedQuery, sortMode)
+    val normalizedQuery = appliedQuery.trim().lowercase()
+    val installedPlugins = remember(allInstalledPlugins, childrenByParent, normalizedQuery, sortMode) {
+        val directlyMatched = filterAndSortPlugins(allInstalledPlugins, normalizedQuery, sortMode)
+        if (normalizedQuery.isBlank()) {
+            directlyMatched
+        } else {
+            val directIds = directlyMatched.mapTo(mutableSetOf()) { it.plugin.pluginId }
+            val childMatchedParentIds = childrenByParent
+                .filterValues { children -> children.any { childMatchesQuery(it, normalizedQuery) } }
+                .keys
+            filterAndSortPlugins(
+                allInstalledPlugins.filter {
+                    it.plugin.pluginId in directIds || it.plugin.pluginId in childMatchedParentIds
+                },
+                "",
+                sortMode
+            )
+        }
     }
-    val searching = appliedQuery.isNotBlank()
+    val searching = normalizedQuery.isNotBlank()
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -510,39 +558,9 @@ private fun PluginCenterHome(
                     onSortModeChange = { sortMode = it }
                 )
             }
-            item(key = "system-header") {
-                CollapsiblePluginSectionHeader(
-                    title = "系统插件",
-                    expanded = systemExpanded,
-                    matchedCount = systemPlugins.size,
-                    totalCount = allSystemPlugins.size,
-                    searching = searching,
-                    onToggle = { systemExpanded = !systemExpanded }
-                )
-            }
-            if (systemExpanded) {
-                if (systemPlugins.isEmpty()) {
-                    item(key = "system-empty") {
-                        Text(if (searching) "系统插件中没有搜索结果" else "当前为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    items(systemPlugins, key = { "system:${it.plugin.pluginId}" }) { snapshot ->
-                        PluginCard(
-                            snapshot = snapshot,
-                            dependencySummary = dependencySummaries.getValue(snapshot.plugin.pluginId),
-                            onOpen = { onOpen(snapshot) },
-                            onEnable = { onEnable(snapshot) },
-                            onDisable = { onDisable(snapshot) },
-                            onUpdate = { onUpdate(snapshot) },
-                            onUninstall = { onUninstall(snapshot) },
-                            onBackup = { onBackup(snapshot) }
-                        )
-                    }
-                }
-            }
             item(key = "installed-header") {
                 CollapsiblePluginSectionHeader(
-                    title = "已安装插件",
+                    title = "父级插件",
                     expanded = installedExpanded,
                     matchedCount = installedPlugins.size,
                     totalCount = allInstalledPlugins.size,
@@ -553,20 +571,55 @@ private fun PluginCenterHome(
             if (installedExpanded) {
                 if (installedPlugins.isEmpty()) {
                     item(key = "installed-empty") {
-                        Text(if (searching) "已安装插件中没有搜索结果" else "当前为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if (searching) "父级插件中没有搜索结果" else "当前为空", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
                     items(installedPlugins, key = { "installed:${it.plugin.pluginId}" }) { snapshot ->
-                        PluginCard(
-                            snapshot = snapshot,
-                            dependencySummary = dependencySummaries.getValue(snapshot.plugin.pluginId),
-                            onOpen = { onOpen(snapshot) },
-                            onEnable = { onEnable(snapshot) },
-                            onDisable = { onDisable(snapshot) },
-                            onUpdate = { onUpdate(snapshot) },
-                            onUninstall = { onUninstall(snapshot) },
-                            onBackup = { onBackup(snapshot) }
-                        )
+                        val parentId = snapshot.plugin.pluginId
+                        val allChildren = childrenByParent[parentId].orEmpty()
+                            .sortedWith(compareBy({ it.displayName.lowercase() }, { it.extensionId }))
+                        val visibleChildren = if (searching) {
+                            allChildren.filter { childMatchesQuery(it, normalizedQuery) }
+                        } else {
+                            allChildren
+                        }
+                        val forcedExpanded = searching && visibleChildren.isNotEmpty()
+                        val childrenExpanded = forcedExpanded || parentId in expandedParentIds
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PluginCard(
+                                snapshot = snapshot,
+                                dependencySummary = dependencySummaries.getValue(parentId),
+                                childCount = allChildren.size,
+                                childExpanded = childrenExpanded,
+                                onToggleChildren = if (allChildren.isEmpty()) null else {
+                                    {
+                                        expandedParentIds = if (parentId in expandedParentIds) {
+                                            expandedParentIds - parentId
+                                        } else {
+                                            expandedParentIds + parentId
+                                        }
+                                    }
+                                },
+                                onOpen = { onOpen(snapshot) },
+                                onEnable = { onEnable(snapshot) },
+                                onDisable = { onDisable(snapshot) },
+                                onUpdate = { onUpdate(snapshot) },
+                                onUninstall = { onUninstall(snapshot) },
+                                onBackup = { onBackup(snapshot) }
+                            )
+                            if (childrenExpanded) {
+                                visibleChildren.forEach { child ->
+                                    ChildExtensionCard(
+                                        child = child,
+                                        onEnable = { onEnableChild(child) },
+                                        onDisable = { onDisableChild(child) },
+                                        onBackup = { onBackupChild(child) },
+                                        onUninstall = { onUninstallChild(child) }
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -673,6 +726,9 @@ private fun ImportPanel(
 private fun PluginCard(
     snapshot: PluginControlSnapshot,
     dependencySummary: PluginDependencySummary,
+    childCount: Int = 0,
+    childExpanded: Boolean = false,
+    onToggleChildren: (() -> Unit)? = null,
     onOpen: () -> Unit,
     onEnable: () -> Unit,
     onDisable: () -> Unit,
@@ -686,7 +742,9 @@ private fun PluginCard(
     val backupVersion = snapshot.plugin.backup?.version
     val canBackup = currentVersion != null && backupVersion != currentVersion
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        modifier = Modifier.fillMaxWidth().clickable {
+            if (onToggleChildren != null) onToggleChildren() else onOpen()
+        },
         shape = RoundedCornerShape(12.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -706,6 +764,13 @@ private fun PluginCard(
                             overflow = TextOverflow.Ellipsis
                         )
                     }
+                }
+                if (childCount > 0) {
+                    Text(
+                        "${if (childExpanded) "▼" else "▶"} 子插件 $childCount",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
             Text(
@@ -731,6 +796,9 @@ private fun PluginCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (onToggleChildren != null) {
+                    TextButton(onClick = onOpen) { Text("详情") }
+                }
                 if (state?.enabled == true) {
                     TextButton(onClick = onDisable) { Text("禁用") }
                 } else {
@@ -739,6 +807,90 @@ private fun PluginCard(
                 TextButton(onClick = onUpdate) { Text("更新") }
                 DangerTextButton(onClick = onUninstall) { Text("卸载") }
                 TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
+            }
+        }
+    }
+}
+
+private fun childMatchesQuery(child: ChildExtensionSummary, normalizedQuery: String): Boolean {
+    if (normalizedQuery.isBlank()) return true
+    return listOf(
+        child.extensionId,
+        child.displayName,
+        child.description.orEmpty(),
+        child.parentPluginId,
+        child.point,
+        child.lifecycle,
+        child.version
+    ).any { it.lowercase().contains(normalizedQuery) }
+}
+
+@Composable
+private fun ChildExtensionCard(
+    child: ChildExtensionSummary,
+    onEnable: () -> Unit,
+    onDisable: () -> Unit,
+    onBackup: () -> Unit,
+    onUninstall: () -> Unit
+) {
+    val statusColor = when (child.lifecycle) {
+        "ACTIVE" -> Color(0xFF00C853)
+        "DISABLED" -> Color(0xFFD32F2F)
+        "FAILED" -> Color(0xFFE65100)
+        else -> Color(0xFFFFB300)
+    }
+    val canBackup = child.backupVersion != child.version
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(start = 28.dp),
+        shape = RoundedCornerShape(10.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(modifier = Modifier.size(9.dp).background(statusColor, CircleShape))
+                Spacer(Modifier.size(8.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(child.displayName, fontWeight = FontWeight.Bold)
+                    Text(
+                        "v${child.version} · ${child.lifecycle}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Text(".ailx", style = MaterialTheme.typography.bodySmall)
+            }
+            child.description?.takeIf { it.isNotBlank() }?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Text(
+                "${child.extensionId} · ${child.point}@${child.apiVersion}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                "使用 ${child.useCount} 次 · 备份 ${child.backupVersion ?: "无"}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            child.lastError?.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                if (child.enabled) {
+                    TextButton(onClick = onDisable) { Text("禁用") }
+                } else {
+                    TextButton(onClick = onEnable) { Text("启用") }
+                }
+                TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
+                DangerTextButton(onClick = onUninstall) { Text("卸载") }
             }
         }
     }

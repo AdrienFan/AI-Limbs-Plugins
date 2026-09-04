@@ -62,17 +62,49 @@ internal class PluginControlPlaneFacade(
     suspend fun snapshots(): List<PluginControlSnapshot> =
         service.call("snapshots").optJSONArray("plugins").jsonObjects().map(::parseControlSnapshot)
 
-    fun childExtensionInventory(): ChildExtensionInventory {
+    private fun extensionHubOrNull(): ExtensionHubService? {
         val binding = host.providers.resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER)
-        if (binding?.ownerPluginId != "plugin.system.extension_hub") {
-            return ChildExtensionInventory(false, emptyList())
-        }
-        val hub = binding.payload as? ExtensionHubService
-            ?: return ChildExtensionInventory(false, emptyList())
+        if (binding?.ownerPluginId != "plugin.system.extension_hub") return null
+        return binding.payload as? ExtensionHubService
+    }
+
+    private fun requireExtensionHub(): ExtensionHubService =
+        extensionHubOrNull() ?: error("Plugin Extension Hub 未启用")
+
+    fun childExtensionInventory(): ChildExtensionInventory {
+        val hub = extensionHubOrNull() ?: return ChildExtensionInventory(false, emptyList())
+        val backups = hub.backupSnapshots().value.associateBy { it.extensionId }
         return ChildExtensionInventory(
             available = true,
-            targetParentPluginIds = hub.snapshots().value.map { it.target.parentPluginId }
+            extensions = hub.snapshots().value.map { child ->
+                ChildExtensionSummary(
+                    extensionId = child.extensionId,
+                    version = child.version,
+                    displayName = child.displayName,
+                    description = child.description,
+                    parentPluginId = child.target.parentPluginId,
+                    point = child.target.point,
+                    apiVersion = child.target.apiVersion,
+                    lifecycle = child.lifecycle.name,
+                    enabled = child.enabled,
+                    useCount = child.useCount,
+                    lastError = child.lastError,
+                    backupVersion = backups[child.extensionId]?.version
+                )
+            }
         )
+    }
+
+    suspend fun setChildExtensionEnabled(extensionId: String, enabled: Boolean) {
+        requireExtensionHub().setEnabled(extensionId, enabled)
+    }
+
+    suspend fun backupChildExtension(extensionId: String) {
+        requireExtensionHub().backup(extensionId)
+    }
+
+    suspend fun uninstallChildExtension(extensionId: String) {
+        check(requireExtensionHub().uninstall(extensionId)) { "子插件不存在：$extensionId" }
     }
 
     suspend fun inspectUri(uri: String): PluginImportCandidate {

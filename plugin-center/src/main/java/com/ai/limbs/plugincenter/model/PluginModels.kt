@@ -75,10 +75,27 @@ data class PluginInstallIdentity(
     val signerId: String?,
     val installedAtEpochMs: Long
 )
+data class ChildExtensionSummary(
+    val extensionId: String,
+    val version: String,
+    val displayName: String,
+    val description: String?,
+    val parentPluginId: String,
+    val point: String,
+    val apiVersion: Int,
+    val lifecycle: String,
+    val enabled: Boolean,
+    val useCount: Long,
+    val lastError: String?,
+    val backupVersion: String?
+)
 data class ChildExtensionInventory(
     val available: Boolean,
+    val extensions: List<ChildExtensionSummary>
+) {
     val targetParentPluginIds: List<String>
-)
+        get() = extensions.map { it.parentPluginId }
+}
 data class PluginBackupSnapshot(
     val pluginId: String,
     val version: String,
