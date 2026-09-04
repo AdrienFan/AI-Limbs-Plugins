@@ -9,6 +9,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -49,10 +50,14 @@ internal fun DynamicNavigationAdminSection(
     var deleteTarget by remember { mutableStateOf<DynamicSurfaceSnapshot?>(null) }
     var renameTarget by remember { mutableStateOf<DynamicSurfaceSnapshot?>(null) }
     var iconTarget by remember { mutableStateOf<DynamicSurfaceSnapshot?>(null) }
+    var selectedSurfaceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var bulkDeleteTargets by remember { mutableStateOf<List<DynamicSurfaceSnapshot>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
     suspend fun refresh() {
-        surfaces = withContext(Dispatchers.IO) { navigation.surfaces() }
+        val latest = withContext(Dispatchers.IO) { navigation.surfaces() }
+        surfaces = latest
+        selectedSurfaceIds = selectedSurfaceIds.intersect(latest.mapTo(linkedSetOf()) { it.surfaceId })
     }
 
     fun mutate(block: suspend () -> Unit) {
@@ -100,7 +105,25 @@ internal fun DynamicNavigationAdminSection(
             Modifier.fillMaxWidth().padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Text("新增页管理", fontWeight = FontWeight.Bold)
+            val allSelected = surfaces.isNotEmpty() && selectedSurfaceIds.size == surfaces.size
+            val selectedTargets = surfaces.filter { it.surfaceId in selectedSurfaceIds }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("新增页管理", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                TextButton(
+                    enabled = !busy && surfaces.isNotEmpty(),
+                    onClick = {
+                        selectedSurfaceIds = if (allSelected) emptySet() else surfaces.mapTo(linkedSetOf()) { it.surfaceId }
+                    }
+                ) { Text(if (allSelected) "取消全选" else "全选") }
+                TextButton(
+                    enabled = !busy && selectedTargets.isNotEmpty() && selectedTargets.all { it.empty },
+                    onClick = { bulkDeleteTargets = selectedTargets }
+                ) { Text("全部删除") }
+            }
             Text("页面 ${surfaces.size} 个", style = MaterialTheme.typography.bodySmall)
             if (surfaces.isEmpty()) {
                 Text("还没有动态页面；请用侧边栏底部的 ⊕ 创建。")
@@ -113,6 +136,17 @@ internal fun DynamicNavigationAdminSection(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = surface.surfaceId in selectedSurfaceIds,
+                                onCheckedChange = { checked ->
+                                    selectedSurfaceIds = if (checked) {
+                                        selectedSurfaceIds + surface.surfaceId
+                                    } else {
+                                        selectedSurfaceIds - surface.surfaceId
+                                    }
+                                },
+                                enabled = !busy
+                            )
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     "${pageNumber.toString().padStart(2, '0')}  ${surface.title.ifEmpty { "（无名称）" }}",
@@ -196,6 +230,19 @@ internal fun DynamicNavigationAdminSection(
             onDelete = { password ->
                 deleteTarget = null
                 mutate { navigation.delete(target.surfaceId, password) }
+            }
+        )
+    }
+    if (bulkDeleteTargets.isNotEmpty()) {
+        DynamicSurfaceDeleteDialog(
+            pageLabel = "已选 ${bulkDeleteTargets.size} 个空页面",
+            onDismiss = { bulkDeleteTargets = emptyList() },
+            onDelete = { password ->
+                val targets = bulkDeleteTargets
+                bulkDeleteTargets = emptyList()
+                mutate {
+                    targets.forEach { target -> navigation.delete(target.surfaceId, password) }
+                }
             }
         )
     }

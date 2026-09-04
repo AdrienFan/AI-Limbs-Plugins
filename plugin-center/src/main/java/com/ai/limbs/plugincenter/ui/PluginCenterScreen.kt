@@ -228,6 +228,18 @@ fun PluginCenterScreen(
         refresh()
     }
 
+    // Dynamic pages can be created from the Host sidebar while Plugin Center stays open.
+    // Keep only this lightweight directory in sync so the page filter updates in-place.
+    LaunchedEffect(navigation) {
+        while (isActive) {
+            delay(350)
+            runCatching { withContext(Dispatchers.IO) { navigation.surfaces() } }
+                .onSuccess { latest ->
+                    if (latest != dynamicSurfaces) dynamicSurfaces = latest
+                }
+        }
+    }
+
     suspend fun importCandidate(uri: android.net.Uri, targetPluginId: String?): PluginImportCandidate {
         return withContext(Dispatchers.IO) {
             controlPlane.inspectUri(uri.toString()).copy(updateTargetId = targetPluginId)
