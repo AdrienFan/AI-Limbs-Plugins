@@ -82,8 +82,28 @@ import org.json.JSONObject
 
 private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
 private const val CHILD_ONLINE_UPDATE_ROLE = "online_update"
+private const val PAGE_FILTER_AI_CHAT_ID = "builtin:main.ai_chat"
+private const val PAGE_FILTER_ASSISTANT_CONFIG_ID = "builtin:main.assistant_config"
+private const val PAGE_FILTER_MEMORY_BASE_ID = "builtin:main.memory_base"
+private const val PAGE_FILTER_PACKAGES_ID = "builtin:main.packages"
+private const val PAGE_FILTER_PERMISSIONS_ID = "builtin:main.shizuku_commands"
+private const val PAGE_FILTER_WORKFLOW_ID = "builtin:main.workflow"
 private const val PAGE_FILTER_TOOLBOX_ID = "builtin:toolbox"
+private const val PAGE_FILTER_SETTINGS_ID = "builtin:main.settings"
 private const val PAGE_FILTER_NO_UI_ID = "builtin:no_ui"
+
+private val BUILTIN_PAGE_FILTER_OPTIONS = listOf(
+    PluginPageFilterOption(PAGE_FILTER_AI_CHAT_ID, "AI 对话"),
+    PluginPageFilterOption(PAGE_FILTER_ASSISTANT_CONFIG_ID, "助手配置"),
+    PluginPageFilterOption(PAGE_FILTER_MEMORY_BASE_ID, "记忆库"),
+    PluginPageFilterOption(PAGE_FILTER_PACKAGES_ID, "包管理"),
+    PluginPageFilterOption(PAGE_FILTER_PERMISSIONS_ID, "权限授予"),
+    PluginPageFilterOption(PAGE_FILTER_WORKFLOW_ID, "工作流"),
+    PluginPageFilterOption(PAGE_FILTER_TOOLBOX_ID, "工具箱"),
+    PluginPageFilterOption(PAGE_FILTER_SETTINGS_ID, "设置")
+)
+
+private val BUILTIN_PAGE_FILTER_IDS = BUILTIN_PAGE_FILTER_OPTIONS.mapTo(linkedSetOf()) { it.id }
 
 private enum class PluginStatusLight(val filterId: String) {
     GREEN("status:green"),
@@ -662,7 +682,7 @@ private fun PluginCenterHome(
     val jumpablePluginIds = remember(activeContributionsByPlugin) { activeContributionsByPlugin.keys }
     val pageFilterOptions = remember(dynamicSurfaces) {
         buildList {
-            add(PluginPageFilterOption(PAGE_FILTER_TOOLBOX_ID, "工具箱"))
+            addAll(BUILTIN_PAGE_FILTER_OPTIONS)
             dynamicSurfaces.forEachIndexed { index, surface ->
                 val sequence = (index + 1).toString().padStart(2, '0')
                 val title = surface.title.trim()
@@ -1164,9 +1184,10 @@ private fun pluginMatchesPageFilter(
     if (selectedPageFilterIds.isEmpty()) return true
     val contributions = activeContributionsByPlugin[pluginId].orEmpty()
     return selectedPageFilterIds.any { pageId ->
-        when (pageId) {
-            PAGE_FILTER_TOOLBOX_ID -> contributions.isNotEmpty()
-            PAGE_FILTER_NO_UI_ID -> contributions.isEmpty()
+        when {
+            pageId == PAGE_FILTER_TOOLBOX_ID -> contributions.isNotEmpty()
+            pageId == PAGE_FILTER_NO_UI_ID -> contributions.isEmpty()
+            pageId in BUILTIN_PAGE_FILTER_IDS -> false
             else -> contributions.any { pageId in it.surfaceIds }
         }
     }

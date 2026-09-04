@@ -62,7 +62,11 @@ internal class PluginControlPlaneFacade(
         host.pluginPlatform.setDeveloperDiscoveryEnabled(enabled)
 
     suspend fun setHostPrimitiveAllowed(id: String, allowed: Boolean) {
-        host.pluginPlatform.setHostPrimitiveAllowed(id, allowed)
+        // Policy surface ids are exposed as `primitive:host.*@N`, while the platform control
+        // contract accepts the canonical Host Primitive id (`host.*@N`). Normalize at this
+        // boundary so single-item and bulk toggles use the same stable identifier.
+        val primitiveId = id.trim().removePrefix("primitive:")
+        host.pluginPlatform.setHostPrimitiveAllowed(primitiveId, allowed)
         cachedSurfaces = fetchHostSurfaceSnapshots()
     }
 

@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -128,6 +130,7 @@ internal fun PluginSearchSortControls(
     val focusManager = LocalFocusManager.current
     var pageFilterExpanded by remember { mutableStateOf(false) }
     var pendingPageFilterIds by remember { mutableStateOf(selectedPageFilterIds) }
+    val pageFilterScrollState = rememberScrollState()
     var statusFilterExpanded by remember { mutableStateOf(false) }
     var pendingStatusFilterIds by remember { mutableStateOf(selectedStatusFilterIds) }
     var sortExpanded by remember { mutableStateOf(false) }
@@ -171,35 +174,48 @@ internal fun PluginSearchSortControls(
                     expanded = pageFilterExpanded,
                     onDismissRequest = { pageFilterExpanded = false }
                 ) {
-                    Text(
-                        "按页面筛选",
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        fontWeight = FontWeight.Bold
-                    )
-                    pageFilterOptions.forEach { option ->
-                        val selected = option.id in pendingPageFilterIds
-                        DropdownMenuItem(
-                            text = { Text("${if (selected) "☑" else "☐"} ${option.label}") },
-                            onClick = {
-                                pendingPageFilterIds = if (selected) {
-                                    pendingPageFilterIds - option.id
-                                } else {
-                                    pendingPageFilterIds + option.id
-                                }
+                    Box(modifier = Modifier.height(360.dp)) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .verticalScroll(pageFilterScrollState)
+                                .padding(end = 9.dp)
+                        ) {
+                            Text(
+                                "按页面筛选",
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                fontWeight = FontWeight.Bold
+                            )
+                            pageFilterOptions.forEach { option ->
+                                val selected = option.id in pendingPageFilterIds
+                                DropdownMenuItem(
+                                    text = { Text("${if (selected) "☑" else "☐"} ${option.label}") },
+                                    onClick = {
+                                        pendingPageFilterIds = if (selected) {
+                                            pendingPageFilterIds - option.id
+                                        } else {
+                                            pendingPageFilterIds + option.id
+                                        }
+                                    }
+                                )
                             }
+                            DropdownMenuItem(
+                                text = { Text("清除页面筛选") },
+                                onClick = { pendingPageFilterIds = emptySet() }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("应用") },
+                                onClick = {
+                                    onPageFilterChange(pendingPageFilterIds)
+                                    pageFilterExpanded = false
+                                }
+                            )
+                        }
+                        ScrollStateScrollIndicator(
+                            state = pageFilterScrollState,
+                            modifier = Modifier.align(Alignment.CenterEnd).fillMaxHeight()
                         )
                     }
-                    DropdownMenuItem(
-                        text = { Text("清除页面筛选") },
-                        onClick = { pendingPageFilterIds = emptySet() }
-                    )
-                    DropdownMenuItem(
-                        text = { Text("应用") },
-                        onClick = {
-                            onPageFilterChange(pendingPageFilterIds)
-                            pageFilterExpanded = false
-                        }
-                    )
                 }
             }
             Box {
