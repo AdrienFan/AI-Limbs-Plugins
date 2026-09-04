@@ -125,7 +125,7 @@ internal class PluginControlPlaneFacade(
     suspend fun exportChildBackups(extensionIds: Collection<String>, treeUri: String): List<String> {
         require(extensionIds.isNotEmpty()) { "至少选择一个子插件备份" }
         val result = host.delegatedCapabilities.invokeAsActivePlugin(
-            InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID,
+            EXTENSION_HUB_PLUGIN_ID,
             EXTENSION_HUB_BACKUP_EXPORT_CAPABILITY,
             JSONObject()
                 .put("extension_ids", JSONArray(extensionIds.distinct().sorted()))
