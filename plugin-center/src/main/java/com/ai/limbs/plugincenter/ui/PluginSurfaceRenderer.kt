@@ -1,6 +1,7 @@
 package com.ai.limbs.plugincenter.ui
 
 import android.content.Intent
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
@@ -15,18 +16,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -111,6 +118,12 @@ class PluginCenterPluginUiRenderer(
         val blocks = remember(surface.documentJson) {
             document.optJSONArray("blocks").toObjectList()
         }
+        val drawerBlock = remember(surface.documentJson) {
+            blocks.lastOrNull { it.optString("type").trim().lowercase() == "page_plugin_drawer" }
+        }
+        val contentBlocks = remember(surface.documentJson) {
+            blocks.filterNot { it.optString("type").trim().lowercase() == "page_plugin_drawer" }
+        }
         val focus = remember(surface.documentJson) { hostFocusTarget(document) }
         val pluginTargeted = focus?.kind == "plugin" && focus.id == surface.ownerPluginId
         var showPluginHighlight by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf(false) }
@@ -124,28 +137,37 @@ class PluginCenterPluginUiRenderer(
             }
         }
         val highlightShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .border(
-                    width = 2.dp,
-                    color = if (showPluginHighlight) Color.Red else Color.Transparent,
-                    shape = highlightShape
-                )
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            item {
-                Text(
-                    surface.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.SemiBold
-                )
-                surface.description?.takeIf { it.isNotBlank() }?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall)
+        Box(Modifier.fillMaxSize()) {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .border(
+                        width = 2.dp,
+                        color = if (showPluginHighlight) Color.Red else Color.Transparent,
+                        shape = highlightShape
+                    )
+                    .padding(start = 20.dp, top = 20.dp, end = if (drawerBlock == null) 20.dp else 48.dp, bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                item {
+                    Text(
+                        surface.title,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    surface.description?.takeIf { it.isNotBlank() }?.let {
+                        Text(it, style = MaterialTheme.typography.bodySmall)
+                    }
                 }
+                items(contentBlocks) { block -> components.Render(surface, block) }
             }
-            items(blocks) { block -> components.Render(surface, block) }
+            if (drawerBlock != null) {
+                PagePluginDrawer(
+                    host = host,
+                    surface = surface,
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                )
+            }
         }
     }
 }
@@ -358,6 +380,28 @@ private fun observedProvider(
 
 private fun childListKey(ownerPluginId: String, point: String): String = "$ownerPluginId|$point"
 
+private data class ChildExtensionInstallCandidate(
+    val uri: android.net.Uri,
+    val displayName: String
+)
+
+private fun childExtensionDisplayName(
+    context: android.content.Context,
+    uri: android.net.Uri
+): String = runCatching {
+    context.contentResolver.query(
+        uri,
+        arrayOf(OpenableColumns.DISPLAY_NAME),
+        null,
+        null,
+        null
+    )?.use { cursor ->
+        if (cursor.moveToFirst()) cursor.getString(0) else null
+    }
+}.getOrNull()?.takeIf { !it.isNullOrBlank() }
+    ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() }
+    ?: "未命名子插件.ailx"
+
 @Composable
 private fun ChildExtensionInstallerBlock(
     host: SystemPluginHostV2,
@@ -369,42 +413,138 @@ private fun ChildExtensionInstallerBlock(
     val point = block.requiredText("point")
     val label = block.requiredText("label")
     val hub = observedProvider(host, InProcessSystemIds.EXTENSION_HUB_PROVIDER)?.payload as? ExtensionHubService
+    var candidates by remember(surface.ownerPluginId, point) {
+        mutableStateOf<List<ChildExtensionInstallCandidate>>(emptyList())
+    }
+    var busy by remember(surface.ownerPluginId, point) { mutableStateOf(false) }
     var feedback by remember(surface.ownerPluginId, point) { mutableStateOf<String?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null && hub != null) {
-            scope.launch {
-                val temporary = File(context.cacheDir, "extension-import-${UUID.randomUUID()}.ailx")
-                try {
-                    withContext(Dispatchers.IO) {
-                        context.contentResolver.openInputStream(uri).use { input ->
-                            requireNotNull(input) { "无法读取选择的子插件" }
-                            temporary.outputStream().use(input::copyTo)
-                        }
-                    }
-                    val snapshot = withContext(Dispatchers.IO) {
-                        hub.install(temporary, surface.ownerPluginId, point)
-                    }
-                    feedback = "已安装 ${snapshot.displayName} ${snapshot.version} · ${snapshot.lifecycle}"
-                    childListExpandRequests.tryEmit(childListKey(surface.ownerPluginId, point))
-                } catch (error: Throwable) {
-                    feedback = "子插件安装失败：${error.message ?: "未知错误"}"
-                } finally {
-                    temporary.delete()
+
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) {
+            uris.forEach { uri ->
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
                 }
             }
+            val imported = uris.map { uri ->
+                ChildExtensionInstallCandidate(uri, childExtensionDisplayName(context, uri))
+            }
+            candidates = (candidates + imported).distinctBy { it.uri.toString() }
+            feedback = null
         }
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Button(enabled = hub != null, onClick = {
-            // Android ActivityResult ownership moved with the complex control into Plugin Center.
-            // Stable Kernel is no longer aware that this component opens a document picker.
-            launcher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-        }) { Text(label) }
-        Text(
-            if (hub == null) "Plugin Extension Hub 未启用" else "仅接受 AIL_EXTENSION_V1 / .ailx",
-            style = MaterialTheme.typography.bodySmall
-        )
-        feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            OutlinedButton(
+                onClick = {
+                    launcher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                },
+                enabled = hub != null && !busy
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Text(" $label")
+            }
+            if (hub == null) {
+                Text("Plugin Extension Hub 未启用", style = MaterialTheme.typography.bodySmall)
+            } else if (candidates.isEmpty()) {
+                Text(
+                    "选择 .ailx 后将在这里形成待安装队列；可以连续添加多个子插件。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                Text("待安装子插件（${candidates.size}）", fontWeight = FontWeight.Bold)
+                candidates.forEach { candidate ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            candidate.displayName,
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        TextButton(
+                            onClick = {
+                                candidates = candidates.filterNot { it.uri == candidate.uri }
+                            },
+                            enabled = !busy
+                        ) { Text("移除") }
+                    }
+                }
+                Text(
+                    "将按队列顺序安装；每个包仍由 Plugin Extension Hub 独立校验格式、所属插件、扩展点与签名。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        enabled = !busy,
+                        onClick = install@{
+                            val currentHub = hub ?: return@install
+                            val queue = candidates.toList()
+                            if (queue.isEmpty()) return@install
+                            scope.launch {
+                                busy = true
+                                val messages = mutableListOf<String>()
+                                try {
+                                    queue.forEach { candidate ->
+                                        runCatching {
+                                            withContext(Dispatchers.IO) {
+                                                val temporary = File(
+                                                    context.cacheDir,
+                                                    "extension-import-${UUID.randomUUID()}.ailx"
+                                                )
+                                                try {
+                                                    context.contentResolver.openInputStream(candidate.uri).use { input ->
+                                                        requireNotNull(input) { "无法读取选择的子插件" }
+                                                        temporary.outputStream().use(input::copyTo)
+                                                    }
+                                                    currentHub.install(
+                                                        temporary,
+                                                        surface.ownerPluginId,
+                                                        point
+                                                    )
+                                                } finally {
+                                                    temporary.delete()
+                                                }
+                                            }
+                                        }.onSuccess { snapshot ->
+                                            messages += "已安装 ${snapshot.displayName} ${snapshot.version} · ${snapshot.lifecycle}"
+                                            candidates = candidates.filterNot { it.uri == candidate.uri }
+                                            childListExpandRequests.tryEmit(
+                                                childListKey(surface.ownerPluginId, point)
+                                            )
+                                        }.onFailure { error ->
+                                            messages += "${candidate.displayName} 安装失败：${error.message ?: "未知错误"}"
+                                        }
+                                    }
+                                    feedback = messages.joinToString("\n")
+                                } finally {
+                                    busy = false
+                                }
+                            }
+                        }
+                    ) { Text(if (candidates.size == 1) "安装" else "安装全部") }
+                    OutlinedButton(
+                        onClick = { candidates = emptyList(); feedback = null },
+                        enabled = !busy
+                    ) { Text("清除全部") }
+                }
+            }
+            feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
     }
 }
 
