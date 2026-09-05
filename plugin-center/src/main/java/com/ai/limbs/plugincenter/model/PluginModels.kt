@@ -118,7 +118,8 @@ data class PluginSnapshot(
 data class PluginControlSnapshot(
     val plugin: PluginSnapshot,
     val health: PluginHealthState,
-    val bindings: List<String> = emptyList()
+    val bindings: List<String> = emptyList(),
+    val officialIdentityTrusted: Boolean = false
 )
 data class HostPrimitiveDefinition(
     val number: Int,

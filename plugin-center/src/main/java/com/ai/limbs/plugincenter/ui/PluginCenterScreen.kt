@@ -1021,6 +1021,13 @@ private fun ImportPanel(
                             "请求权限：" + if (scopes.isEmpty()) "无" else scopes.joinToString(),
                             style = MaterialTheme.typography.bodySmall
                         )
+                        if (candidate.manifest.runtime.kind == "android_inprocess") {
+                            Text(
+                                "高权限运行：批准后，该插件身份可在正式签名校验通过后进入 AI Limbs 主进程；插件 ID、Runtime 与 Role 将一并登记。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
                 Text(

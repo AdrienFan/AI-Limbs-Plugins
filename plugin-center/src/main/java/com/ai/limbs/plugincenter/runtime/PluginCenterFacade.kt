@@ -206,11 +206,17 @@ internal class PluginControlPlaneFacade(
     }
 
     suspend fun installUri(candidate: PluginImportCandidate, options: PluginInstallOptions) {
-        service.call("install_uri", JSONObject()
+        val request = JSONObject()
             .put("uri", candidate.uri)
             .put("allow_untrusted_for_development", options.allowUntrustedForDevelopment)
             .put("enable_after_install", options.enableAfterInstall)
-            .put("approved_scopes", JSONArray(options.approvedScopes.toList())))
+            .put("approved_scopes", JSONArray(options.approvedScopes.toList()))
+        if (candidate.manifest.runtime.kind == "android_inprocess") {
+            request
+                .put("approve_inprocess_identity", true)
+                .put("approved_inprocess_roles", JSONArray(candidate.manifest.roles.sorted()))
+        }
+        service.call("install_uri", request)
     }
     suspend fun enable(pluginId: String) {
         service.call("enable", JSONObject().put("plugin_id", pluginId))
@@ -534,7 +540,8 @@ private fun parseControlSnapshot(json: JSONObject): PluginControlSnapshot {
             backup = json.optJSONObject("backup")?.let(::parseBackup),
             mountedVersion = json.optNullableString("mounted_version")
         ),
-        health = PluginHealthState.valueOf(json.optString("health", "OK"))
+        health = PluginHealthState.valueOf(json.optString("health", "OK")),
+        officialIdentityTrusted = json.optBoolean("official_identity_trusted", false)
     )
 }
 
