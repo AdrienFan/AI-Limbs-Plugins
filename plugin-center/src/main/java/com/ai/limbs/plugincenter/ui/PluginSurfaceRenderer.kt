@@ -136,29 +136,41 @@ class PluginCenterPluginUiRenderer(
             }
         }
         val highlightShape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp)
-        Box(Modifier.fillMaxSize()) {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .border(
-                        width = 2.dp,
-                        color = if (showPluginHighlight) Color.Red else Color.Transparent,
-                        shape = highlightShape
-                    )
-                    .padding(start = 20.dp, top = 20.dp, end = if (drawerBlock == null) 20.dp else 48.dp, bottom = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                item {
-                    Text(
-                        surface.title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    surface.description?.takeIf { it.isNotBlank() }?.let {
-                        Text(it, style = MaterialTheme.typography.bodySmall)
-                    }
+        val edgeToEdge = document.optString("layout").trim().lowercase() == "edge_to_edge"
+        Box(
+            Modifier
+                .fillMaxSize()
+                .border(
+                    width = 2.dp,
+                    color = if (showPluginHighlight) Color.Red else Color.Transparent,
+                    shape = highlightShape
+                )
+        ) {
+            if (edgeToEdge) {
+                if (contentBlocks.size != 1) {
+                    UnsupportedDocument("edge_to_edge 布局必须且只能包含一个内容组件")
+                } else {
+                    components.Render(surface, contentBlocks.single())
                 }
-                items(contentBlocks) { block -> components.Render(surface, block) }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(start = 20.dp, top = 20.dp, end = if (drawerBlock == null) 20.dp else 48.dp, bottom = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    item {
+                        Text(
+                            surface.title,
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        surface.description?.takeIf { it.isNotBlank() }?.let {
+                            Text(it, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    items(contentBlocks) { block -> components.Render(surface, block) }
+                }
             }
             if (drawerBlock != null) {
                 PagePluginDrawer(
@@ -188,6 +200,7 @@ private class PluginUiComponentRegistry(private val host: SystemPluginHostV2) {
         "child_extension_selector" to { surface, block -> ChildExtensionSelectorBlock(host, surface, block) },
         "child_extension_list" to { surface, block -> ChildExtensionListBlock(host, surface, block) },
         "dynamic_panel" to { surface, block -> DynamicPanelBlock(host, surface, block) },
+        "terminal_workbench" to { surface, block -> TerminalWorkbenchBlock(host, surface, block) },
         "component_slot" to { surface, block -> ComponentSlotBlock(surface, block) }
     )
 
