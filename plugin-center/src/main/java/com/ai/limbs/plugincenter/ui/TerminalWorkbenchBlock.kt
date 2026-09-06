@@ -2,6 +2,8 @@ package com.ai.limbs.plugincenter.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
@@ -14,7 +16,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -36,9 +41,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
@@ -53,6 +63,7 @@ private val TerminalChrome = Color(0xFF1D201D)
 private val TerminalTab = Color(0xFF30322F)
 private val TerminalAccent = Color(0xFF00C853)
 private val TerminalDanger = Color(0xFF9E4545)
+private const val Legacy06478MetricsProfile = "ai_limbs_06478"
 
 @Composable
 internal fun TerminalWorkbenchBlock(
@@ -95,6 +106,12 @@ internal fun TerminalWorkbenchBlock(
     val inputEnabled = state.optBoolean("input_enabled")
     val shareOnline = state.optBoolean("share_online")
     val localControlsEnabled = state.optBoolean("local_controls_enabled")
+    val legacy06478 = block.optString("metrics_profile") == Legacy06478MetricsProfile
+    val density = LocalDensity.current
+    val consoleFontSize = if (legacy06478) with(density) { 42f.toSp() } else 15.sp
+    val consoleHorizontalPadding = if (legacy06478) with(density) { 16f.toDp() } else 14.dp
+    val consoleVerticalPadding = if (legacy06478) with(density) { 16f.toDp() } else 12.dp
+    val consoleLineHeight = if (legacy06478) TextUnit.Unspecified else 19.sp
     val scope = rememberCoroutineScope()
     var command by remember(providerId, activeTabId) { mutableStateOf("") }
     var feedback by remember(providerId) { mutableStateOf<String?>(null) }
@@ -137,14 +154,20 @@ internal fun TerminalWorkbenchBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(TerminalChrome)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
+                .then(
+                    if (legacy06478) {
+                        Modifier.height(40.dp).padding(horizontal = 8.dp, vertical = 4.dp)
+                    } else {
+                        Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                    }
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(if (legacy06478) 4.dp else 6.dp)
             ) {
                 tabs.forEach { tab ->
                     val tabId = tab.stringRequired("id")
@@ -154,26 +177,44 @@ internal fun TerminalWorkbenchBlock(
                         closable = tab.optBoolean("closable"),
                         shared = tab.optBoolean("shared"),
                         online = tab.optBoolean("online"),
+                        legacy06478 = legacy06478,
                         onSelect = { invoke("select_tab", JSONObject().put("tab_id", tabId)) },
                         onClose = { invoke("close_tab", JSONObject().put("tab_id", tabId)) }
                     )
                 }
             }
-            TextButton(
-                enabled = busyEvent == null,
-                onClick = { invoke("show_shared") }
-            ) {
-                Text(
+            if (legacy06478) {
+                LegacyTerminalIconButton(
                     text = if (shareOnline) "◉" else "◎",
-                    color = if (shareOnline) TerminalAccent else Color.LightGray,
-                    fontSize = 23.sp
+                    textColor = if (shareOnline) TerminalAccent else Color.Gray,
+                    fontSize = 18.sp,
+                    enabled = busyEvent == null,
+                    onClick = { invoke("show_shared") }
                 )
-            }
-            TextButton(
-                enabled = busyEvent == null,
-                onClick = { invoke("add_tab") }
-            ) {
-                Text("+", color = Color.White, fontSize = 28.sp)
+                LegacyTerminalIconButton(
+                    text = "+",
+                    textColor = Color.White,
+                    fontSize = 20.sp,
+                    enabled = busyEvent == null,
+                    onClick = { invoke("add_tab") }
+                )
+            } else {
+                TextButton(
+                    enabled = busyEvent == null,
+                    onClick = { invoke("show_shared") }
+                ) {
+                    Text(
+                        text = if (shareOnline) "◉" else "◎",
+                        color = if (shareOnline) TerminalAccent else Color.LightGray,
+                        fontSize = 23.sp
+                    )
+                }
+                TextButton(
+                    enabled = busyEvent == null,
+                    onClick = { invoke("add_tab") }
+                ) {
+                    Text("+", color = Color.White, fontSize = 28.sp)
+                }
             }
         }
 
@@ -188,11 +229,11 @@ internal fun TerminalWorkbenchBlock(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(consoleScroll)
-                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                        .padding(horizontal = consoleHorizontalPadding, vertical = consoleVerticalPadding),
                     color = Color.White,
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 15.sp,
-                    lineHeight = 19.sp
+                    fontSize = consoleFontSize,
+                    lineHeight = consoleLineHeight
                 )
             }
         }
@@ -205,7 +246,10 @@ internal fun TerminalWorkbenchBlock(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(TerminalChrome)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .padding(
+                        horizontal = if (legacy06478) 8.dp else 10.dp,
+                        vertical = if (legacy06478) 3.dp else 4.dp
+                    )
             )
         }
 
@@ -213,101 +257,184 @@ internal fun TerminalWorkbenchBlock(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(TerminalChrome)
-                .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                .padding(
+                    horizontal = 8.dp,
+                    vertical = if (legacy06478) 4.dp else 6.dp
+                ),
+            horizontalArrangement = Arrangement.spacedBy(if (legacy06478) 4.dp else 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            OutlinedButton(
-                enabled = localControlsEnabled && sessionActive && busyEvent == null,
-                onClick = { invoke("ctrl_c") }
-            ) {
-                Text("Ctrl+C")
-            }
-            Button(
-                enabled = localControlsEnabled && busyEvent == null,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (ubuntuRunning) TerminalDanger else Color(0xFF3567B7)
-                ),
-                onClick = { invoke(if (ubuntuRunning) "stop" else "start") }
-            ) {
-                Text(if (ubuntuRunning) "停止 Ubuntu" else "启动 Ubuntu")
-            }
-            Box {
-                OutlinedButton(
+            if (legacy06478) {
+                LegacyToolbarButton(
+                    label = "Ctrl+C",
+                    secondaryLabel = "中断",
+                    enabled = localControlsEnabled && sessionActive && busyEvent == null,
+                    onClick = { invoke("ctrl_c") }
+                )
+                LegacyToolbarButton(
+                    label = if (ubuntuRunning) "停止 Ubuntu" else "启动 Ubuntu",
                     enabled = localControlsEnabled && busyEvent == null,
-                    onClick = { configExpanded = true }
-                ) {
-                    Text("环境配置")
+                    containerColor = if (ubuntuRunning) Color(0xFF7A3434) else Color(0xFF245B3A),
+                    onClick = { invoke(if (ubuntuRunning) "stop" else "start") }
+                )
+                Box {
+                    LegacyToolbarButton(
+                        label = "环境配置",
+                        enabled = localControlsEnabled && busyEvent == null,
+                        onClick = { configExpanded = true }
+                    )
+                    TerminalIdleDropdown(
+                        expanded = configExpanded,
+                        onDismiss = { configExpanded = false },
+                        onSelect = { mode ->
+                            configExpanded = false
+                            invoke("set_idle", JSONObject().put("mode", mode))
+                        }
+                    )
                 }
-                DropdownMenu(
-                    expanded = configExpanded,
-                    onDismissRequest = { configExpanded = false }
+                Text(
+                    text = state.optString("idle_label"),
+                    color = Color.Gray,
+                    fontSize = 10.5f.sp,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                OutlinedButton(
+                    enabled = localControlsEnabled && sessionActive && busyEvent == null,
+                    onClick = { invoke("ctrl_c") }
                 ) {
-                    listOf(
-                        "KEEP_RUNNING" to "保持运行",
-                        "MINUTES_10" to "10 分钟",
-                        "MINUTES_15" to "15 分钟",
-                        "MINUTES_30" to "30 分钟",
-                        "MINUTES_60" to "60 分钟"
-                    ).forEach { (mode, label) ->
-                        DropdownMenuItem(
-                            text = { Text("空闲策略：$label") },
-                            onClick = {
-                                configExpanded = false
-                                invoke("set_idle", JSONObject().put("mode", mode))
-                            }
-                        )
+                    Text("Ctrl+C")
+                }
+                Button(
+                    enabled = localControlsEnabled && busyEvent == null,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (ubuntuRunning) TerminalDanger else Color(0xFF3567B7)
+                    ),
+                    onClick = { invoke(if (ubuntuRunning) "stop" else "start") }
+                ) {
+                    Text(if (ubuntuRunning) "停止 Ubuntu" else "启动 Ubuntu")
+                }
+                Box {
+                    OutlinedButton(
+                        enabled = localControlsEnabled && busyEvent == null,
+                        onClick = { configExpanded = true }
+                    ) {
+                        Text("环境配置")
                     }
+                    TerminalIdleDropdown(
+                        expanded = configExpanded,
+                        onDismiss = { configExpanded = false },
+                        onSelect = { mode ->
+                            configExpanded = false
+                            invoke("set_idle", JSONObject().put("mode", mode))
+                        }
+                    )
                 }
+                Text(
+                    text = state.optString("idle_label"),
+                    color = Color.Gray,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.weight(1f)
+                )
             }
-            Text(
-                text = state.optString("idle_label"),
-                color = Color.Gray,
-                style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.weight(1f)
-            )
         }
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(TerminalBlack)
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(
+                    horizontal = if (legacy06478) 8.dp else 10.dp,
+                    vertical = 8.dp
+                ),
+            horizontalArrangement = Arrangement.spacedBy(if (legacy06478) 4.dp else 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Surface(color = Color(0xFF006D16), shape = MaterialTheme.shapes.small) {
-                Text(
-                    text = state.optString("prompt", "~ $"),
-                    color = Color.White,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
-                )
-            }
-            OutlinedTextField(
-                value = command,
-                onValueChange = { command = it },
-                enabled = inputEnabled && busyEvent == null,
-                placeholder = {
-                    Text(if (inputEnabled) "输入命令" else "共享标签页只读")
-                },
-                modifier = Modifier.weight(1f),
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(
-                    onSend = {
-                        if (command.isNotBlank()) {
-                            invoke("execute", JSONObject().put("command", command))
+            if (legacy06478) {
+                Surface(color = Color(0xFF006400), shape = RoundedCornerShape(4.dp)) {
+                    Text(
+                        text = state.optString("prompt", "~ $"),
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 0.8f.dp)
+                    )
+                }
+                BasicTextField(
+                    value = command,
+                    onValueChange = { command = it },
+                    enabled = inputEnabled && busyEvent == null,
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = if (inputEnabled) Color.White else Color.Gray,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 14.sp
+                    ),
+                    cursorBrush = SolidColor(TerminalAccent),
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(
+                        onSend = {
+                            if (command.isNotBlank()) {
+                                invoke("execute", JSONObject().put("command", command))
+                            }
+                        }
+                    ),
+                    decorationBox = { innerTextField ->
+                        Box(Modifier.fillMaxWidth()) {
+                            if (command.isEmpty()) {
+                                Text(
+                                    if (inputEnabled) "输入命令" else "共享标签页只读",
+                                    color = Color.Gray,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 14.sp
+                                )
+                            }
+                            innerTextField()
                         }
                     }
                 )
-            )
-            Button(
-                enabled = inputEnabled && command.isNotBlank() && busyEvent == null,
-                onClick = { invoke("execute", JSONObject().put("command", command)) }
-            ) {
-                Text("↵")
+                LegacyTerminalIconButton(
+                    text = "↵",
+                    textColor = Color.White,
+                    fontSize = 16.sp,
+                    enabled = inputEnabled && command.isNotBlank() && busyEvent == null,
+                    onClick = { invoke("execute", JSONObject().put("command", command)) }
+                )
+            } else {
+                Surface(color = Color(0xFF006D16), shape = MaterialTheme.shapes.small) {
+                    Text(
+                        text = state.optString("prompt", "~ $"),
+                        color = Color.White,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
+                    )
+                }
+                OutlinedTextField(
+                    value = command,
+                    onValueChange = { command = it },
+                    enabled = inputEnabled && busyEvent == null,
+                    placeholder = {
+                        Text(if (inputEnabled) "输入命令" else "共享标签页只读")
+                    },
+                    modifier = Modifier.weight(1f),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(
+                        onSend = {
+                            if (command.isNotBlank()) {
+                                invoke("execute", JSONObject().put("command", command))
+                            }
+                        }
+                    )
+                )
+                Button(
+                    enabled = inputEnabled && command.isNotBlank() && busyEvent == null,
+                    onClick = { invoke("execute", JSONObject().put("command", command)) }
+                ) {
+                    Text("↵")
+                }
             }
         }
     }
@@ -320,31 +447,145 @@ private fun TerminalTabChip(
     closable: Boolean,
     shared: Boolean,
     online: Boolean,
+    legacy06478: Boolean,
     onSelect: () -> Unit,
     onClose: () -> Unit
 ) {
+    if (legacy06478) {
+        Surface(
+            color = if (selected) Color(0xFF4A4A4A) else Color(0xFF3A3A3A),
+            shape = RoundedCornerShape(8.dp),
+            modifier = Modifier
+                .widthIn(min = 72.dp, max = 200.dp)
+                .height(32.dp)
+                .clickable(onClick = onSelect)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(start = 12.dp, end = if (closable) 4.dp else 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (shared) {
+                    Text("●", color = if (online) TerminalAccent else Color.Gray, fontSize = 10.sp)
+                }
+                Text(
+                    title,
+                    color = if (selected) Color.White else Color.Gray,
+                    fontSize = 12.sp,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (closable) {
+                    Box(
+                        modifier = Modifier.size(16.dp).clickable(onClick = onClose),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("×", color = Color.LightGray, fontSize = 16.sp)
+                    }
+                }
+            }
+        }
+    } else {
+        Surface(
+            color = if (selected) Color(0xFF535550) else TerminalTab,
+            shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.clickable(onClick = onSelect)
+        ) {
+            Row(
+                modifier = Modifier.padding(start = 14.dp, end = if (closable) 4.dp else 14.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                if (shared) {
+                    Text("●", color = if (online) TerminalAccent else Color.Gray, fontSize = 10.sp)
+                }
+                Text(title, color = Color.White, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                if (closable) {
+                    Text(
+                        "×",
+                        color = Color.LightGray,
+                        fontSize = 20.sp,
+                        modifier = Modifier.clickable(onClick = onClose).padding(horizontal = 5.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LegacyTerminalIconButton(
+    text: String,
+    textColor: Color,
+    fontSize: TextUnit,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
     Surface(
-        color = if (selected) Color(0xFF535550) else TerminalTab,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier.clickable(onClick = onSelect)
+        color = if (enabled) Color(0xFF3A3A3A) else Color(0xFF303030),
+        shape = RoundedCornerShape(6.4f.dp),
+        modifier = Modifier.size(32.dp).clickable(enabled = enabled, onClick = onClick)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(text = text, color = if (enabled) textColor else Color.Gray, fontSize = fontSize)
+        }
+    }
+}
+
+@Composable
+private fun LegacyToolbarButton(
+    label: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    secondaryLabel: String? = null,
+    containerColor: Color = Color(0xFF4A4A4A)
+) {
+    Surface(
+        color = if (enabled) containerColor else Color(0xFF303030),
+        shape = RoundedCornerShape(6.dp),
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
     ) {
         Row(
-            modifier = Modifier.padding(start = 14.dp, end = if (closable) 4.dp else 14.dp, top = 8.dp, bottom = 8.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.2f.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(2.4f.dp)
         ) {
-            if (shared) {
-                Text("●", color = if (online) TerminalAccent else Color.Gray, fontSize = 10.sp)
+            Text(
+                text = label,
+                color = if (enabled) Color.White else Color.Gray,
+                fontSize = 11.2f.sp,
+                fontWeight = FontWeight.Medium,
+                fontFamily = if (label == "Ctrl+C") FontFamily.Monospace else FontFamily.Default
+            )
+            secondaryLabel?.let {
+                Text(text = it, color = Color.Gray, fontSize = 10.1f.sp)
             }
-            Text(title, color = Color.White, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
-            if (closable) {
-                Text(
-                    "×",
-                    color = Color.LightGray,
-                    fontSize = 20.sp,
-                    modifier = Modifier.clickable(onClick = onClose).padding(horizontal = 5.dp)
-                )
-            }
+        }
+    }
+}
+
+@Composable
+private fun TerminalIdleDropdown(
+    expanded: Boolean,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit
+) {
+    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
+        listOf(
+            "KEEP_RUNNING" to "保持运行",
+            "MINUTES_10" to "10 分钟",
+            "MINUTES_15" to "15 分钟",
+            "MINUTES_30" to "30 分钟",
+            "MINUTES_60" to "60 分钟"
+        ).forEach { (mode, label) ->
+            DropdownMenuItem(
+                text = { Text("空闲策略：$label") },
+                onClick = { onSelect(mode) }
+            )
         }
     }
 }
