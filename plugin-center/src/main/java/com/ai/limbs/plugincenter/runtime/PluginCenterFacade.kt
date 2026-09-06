@@ -69,6 +69,9 @@ internal class PluginControlPlaneFacade(
     suspend fun snapshots(): List<PluginControlSnapshot> =
         service.call("snapshots").optJSONArray("plugins").jsonObjects().map(::parseControlSnapshot)
 
+    private suspend fun snapshot(pluginId: String): PluginControlSnapshot =
+        parseControlSnapshot(service.call("snapshot", JSONObject().put("plugin_id", pluginId)))
+
     private fun extensionHubOrNull(): ExtensionHubService? {
         val binding = host.providers.resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER)
         if (binding?.ownerPluginId != "plugin.system.extension_hub") return null
@@ -206,6 +209,16 @@ internal class PluginControlPlaneFacade(
     }
 
     suspend fun installUri(candidate: PluginImportCandidate, options: PluginInstallOptions) {
+        val upgradeTarget = candidate.updateTargetId
+        if (upgradeTarget != null) {
+            require(upgradeTarget == candidate.manifest.pluginId) { "升级目标 plugin_id 与安装包不一致" }
+            val installed = snapshot(upgradeTarget)
+            val latestInstalledVersion = installed.plugin.versions.lastOrNull()
+                ?: installed.plugin.persistentState?.activeVersion
+                ?: error("目标插件没有可比较的已安装版本：$upgradeTarget")
+            requireStrictUpgradeVersion(candidate.manifest.version, latestInstalledVersion)
+        }
+
         val request = JSONObject()
             .put("uri", candidate.uri)
             .put("allow_untrusted_for_development", options.allowUntrustedForDevelopment)
@@ -217,6 +230,7 @@ internal class PluginControlPlaneFacade(
                 .put("approved_inprocess_roles", JSONArray(candidate.manifest.roles.sorted()))
         }
         service.call("install_uri", request)
+        upgradeTarget?.let { activateVersion(it, candidate.manifest.version) }
     }
     suspend fun enable(pluginId: String) {
         service.call("enable", JSONObject().put("plugin_id", pluginId))
@@ -634,6 +648,61 @@ private fun JSONArray?.jsonObjects(): List<JSONObject> = buildList {
     val array = this@jsonObjects ?: return@buildList
     for (index in 0 until array.length()) {
         array.optJSONObject(index)?.let(::add)
+    }
+}
+
+
+
+private data class ComparableSemanticVersion(
+    val major: Int,
+    val minor: Int,
+    val patch: Int,
+    val prerelease: List<String> = emptyList()
+) : Comparable<ComparableSemanticVersion> {
+    override fun compareTo(other: ComparableSemanticVersion): Int {
+        compareValues(major, other.major).takeIf { it != 0 }?.let { return it }
+        compareValues(minor, other.minor).takeIf { it != 0 }?.let { return it }
+        compareValues(patch, other.patch).takeIf { it != 0 }?.let { return it }
+        if (prerelease.isEmpty() && other.prerelease.isNotEmpty()) return 1
+        if (prerelease.isNotEmpty() && other.prerelease.isEmpty()) return -1
+        val size = maxOf(prerelease.size, other.prerelease.size)
+        for (index in 0 until size) {
+            val left = prerelease.getOrNull(index) ?: return -1
+            val right = other.prerelease.getOrNull(index) ?: return 1
+            val leftNumber = left.toIntOrNull()
+            val rightNumber = right.toIntOrNull()
+            val result = when {
+                leftNumber != null && rightNumber != null -> leftNumber.compareTo(rightNumber)
+                leftNumber != null -> -1
+                rightNumber != null -> 1
+                else -> left.compareTo(right)
+            }
+            if (result != 0) return result
+        }
+        return 0
+    }
+
+    companion object {
+        private val PATTERN = Regex("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-([0-9A-Za-z.-]+))?(?:\\+[0-9A-Za-z.-]+)?$")
+        fun parse(raw: String): ComparableSemanticVersion? {
+            val match = PATTERN.matchEntire(raw.trim()) ?: return null
+            return ComparableSemanticVersion(
+                major = match.groupValues[1].toInt(),
+                minor = match.groupValues[2].toInt(),
+                patch = match.groupValues[3].toInt(),
+                prerelease = match.groupValues[4].takeIf { it.isNotBlank() }?.split('.') ?: emptyList()
+            )
+        }
+    }
+}
+
+private fun requireStrictUpgradeVersion(candidate: String, latestInstalled: String) {
+    val candidateVersion = ComparableSemanticVersion.parse(candidate)
+        ?: throw IllegalArgumentException("升级包版本不是有效 SemVer：$candidate")
+    val installedVersion = ComparableSemanticVersion.parse(latestInstalled)
+        ?: throw IllegalStateException("已安装版本不是有效 SemVer：$latestInstalled")
+    require(candidateVersion > installedVersion) {
+        "升级包版本 v$candidate 必须高于已安装最新版 v$latestInstalled；已有版本请使用切换版本或回滚"
     }
 }
 

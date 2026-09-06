@@ -1,5 +1,6 @@
 package com.ai.limbs.plugincenter
 
+import com.ai.assistance.operit.plugins.system.SystemPageAccessoryHostV1
 import com.ai.assistance.operit.plugins.system.SystemPluginEntryV1
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV1
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
@@ -8,6 +9,7 @@ import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
 import com.ai.assistance.operit.plugins.system.SystemUiPageV1
 import com.ai.limbs.plugincenter.runtime.PluginCenterDelegatedGateway
 import com.ai.limbs.plugincenter.runtime.PluginCenterRuntime
+import com.ai.limbs.plugincenter.ui.PluginCenterPageAccessoryRenderer
 import com.ai.limbs.plugincenter.ui.PluginCenterPluginUiRenderer
 import com.ai.limbs.plugincenter.ui.PluginCenterScreen
 
@@ -24,9 +26,19 @@ class PluginCenterEntry : SystemPluginEntryV1 {
             PluginCenterRuntime.detach()
             throw error
         }
+        val accessoryHandle = try {
+            (hostV2.ui as? SystemPageAccessoryHostV1)
+                ?.registerPageAccessoryRenderer(PluginCenterPageAccessoryRenderer(hostV2))
+                ?: AutoCloseable { }
+        } catch (error: Throwable) {
+            runCatching { rendererHandle.close() }
+            PluginCenterRuntime.detach()
+            throw error
+        }
         val serviceHandle = try {
             PluginCenterDelegatedGateway(hostV2).publish()
         } catch (error: Throwable) {
+            runCatching { accessoryHandle.close() }
             runCatching { rendererHandle.close() }
             PluginCenterRuntime.detach()
             throw error
@@ -43,6 +55,7 @@ class PluginCenterEntry : SystemPluginEntryV1 {
             )
         } catch (error: Throwable) {
             runCatching { serviceHandle.close() }
+            runCatching { accessoryHandle.close() }
             runCatching { rendererHandle.close() }
             PluginCenterRuntime.detach()
             throw error
@@ -50,6 +63,7 @@ class PluginCenterEntry : SystemPluginEntryV1 {
         return AutoCloseable {
             runCatching { uiHandle.close() }
             runCatching { serviceHandle.close() }
+            runCatching { accessoryHandle.close() }
             runCatching { rendererHandle.close() }
             PluginCenterRuntime.detach()
         }

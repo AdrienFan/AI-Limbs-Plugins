@@ -97,6 +97,25 @@ interface SystemPluginUiRendererV2 {
     fun Render(surface: SystemPluginUiSurfaceV2)
 }
 
+data class SystemPageContextV1(
+    val pageId: String,
+    val kind: String,
+    val ownerPluginId: String? = null,
+    val screenId: String? = null,
+    val surfaceId: String? = null,
+    val documentJson: String? = null,
+    val embeddedPluginIds: List<String> = emptyList()
+)
+
+interface SystemPageAccessoryRendererV1 {
+    @Composable
+    fun Render(context: SystemPageContextV1)
+}
+
+interface SystemPageAccessoryHostV1 {
+    fun registerPageAccessoryRenderer(renderer: SystemPageAccessoryRendererV1): AutoCloseable
+}
+
 interface SystemUiHostV2 : SystemUiHostV1 {
     fun registerPluginSurfaceRenderer(renderer: SystemPluginUiRendererV2): AutoCloseable
 }

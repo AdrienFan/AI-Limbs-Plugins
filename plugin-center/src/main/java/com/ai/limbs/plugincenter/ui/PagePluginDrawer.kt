@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
@@ -21,6 +22,8 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -32,8 +35,8 @@ import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -49,12 +52,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.ai.assistance.operit.plugins.system.SystemPageAccessoryRendererV1
+import com.ai.assistance.operit.plugins.system.SystemPageContextV1
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
-import com.ai.assistance.operit.plugins.system.SystemPluginUiSurfaceV2
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
@@ -99,35 +103,47 @@ internal sealed interface PagePluginParticipant {
     }
 }
 
+internal class PluginCenterPageAccessoryRenderer(
+    private val host: SystemPluginHostV2
+) : SystemPageAccessoryRendererV1 {
+    @Composable
+    override fun Render(context: SystemPageContextV1) {
+        PagePluginDrawer(host = host, pageContext = context)
+    }
+}
+
 @Composable
 internal fun PagePluginDrawer(
     host: SystemPluginHostV2,
-    surface: SystemPluginUiSurfaceV2,
+    pageContext: SystemPageContextV1,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val controlPlane = remember { PluginCenterRuntime.controlPlane }
     val adminSecurity = remember { PluginCenterRuntime.adminSecurity }
-    val referencedProviderIds = remember(surface.documentJson) {
-        referencedProviderIds(surface.documentJson)
+    val ownerPluginId = pageContext.ownerPluginId?.trim()?.takeIf { it.isNotEmpty() }
+    val documentJson = pageContext.documentJson.orEmpty()
+    val referencedProviderIds = remember(pageContext.pageId, documentJson) {
+        referencedProviderIds(documentJson)
     }
-    val renderedChildScopes = remember(surface.ownerPluginId, surface.documentJson) {
-        renderedChildScopes(surface.ownerPluginId, surface.documentJson)
+    val renderedChildScopes = remember(pageContext.pageId, ownerPluginId, documentJson) {
+        if (ownerPluginId == null || documentJson.isBlank()) emptySet()
+        else renderedChildScopes(ownerPluginId, documentJson)
     }
 
-    var expanded by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf(false) }
-    var pluginSnapshots by remember(surface.ownerPluginId) { mutableStateOf<List<PluginControlSnapshot>>(emptyList()) }
-    var childSnapshots by remember(surface.ownerPluginId) { mutableStateOf<List<ChildExtensionSnapshot>>(emptyList()) }
-    var providerPluginIds by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf<Set<String>>(emptySet()) }
-    var feedback by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf<String?>(null) }
-    var busyIds by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf<Set<String>>(emptySet()) }
-    var updateTarget by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf<PagePluginParticipant?>(null) }
-    var pendingDisable by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf<PagePluginParticipant?>(null) }
-    var showAdminSetup by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf(false) }
-    var showAdminPassword by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf(false) }
-    var showAdminRecovery by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf(false) }
-    var recoveryKeyToShow by remember(surface.ownerPluginId, surface.screenId) { mutableStateOf<String?>(null) }
+    var expanded by remember(pageContext.pageId) { mutableStateOf(false) }
+    var pluginSnapshots by remember { mutableStateOf<List<PluginControlSnapshot>>(emptyList()) }
+    var childSnapshots by remember { mutableStateOf<List<ChildExtensionSnapshot>>(emptyList()) }
+    var providerPluginIds by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
+    var feedback by remember(pageContext.pageId) { mutableStateOf<String?>(null) }
+    var busyIds by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
+    var updateTarget by remember(pageContext.pageId) { mutableStateOf<PagePluginParticipant?>(null) }
+    var pendingDisable by remember(pageContext.pageId) { mutableStateOf<PagePluginParticipant?>(null) }
+    var showAdminSetup by remember(pageContext.pageId) { mutableStateOf(false) }
+    var showAdminPassword by remember(pageContext.pageId) { mutableStateOf(false) }
+    var showAdminRecovery by remember(pageContext.pageId) { mutableStateOf(false) }
+    var recoveryKeyToShow by remember(pageContext.pageId) { mutableStateOf<String?>(null) }
 
     val initialHubBinding = remember { host.providers.resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER) }
     val hubBinding by host.providers.observe(InProcessSystemIds.EXTENSION_HUB_PROVIDER)
@@ -136,7 +152,7 @@ internal fun PagePluginDrawer(
         ?.takeIf { it.ownerPluginId == "plugin.system.extension_hub" }
         ?.payload as? ExtensionHubService
 
-    LaunchedEffect(hub, surface.ownerPluginId) {
+    LaunchedEffect(hub) {
         if (hub == null) {
             childSnapshots = emptyList()
             return@LaunchedEffect
@@ -144,13 +160,13 @@ internal fun PagePluginDrawer(
         hub.snapshots().collect { latest -> childSnapshots = latest }
     }
 
-    LaunchedEffect(controlPlane, surface.ownerPluginId, referencedProviderIds) {
+    LaunchedEffect(controlPlane, pageContext.pageId, ownerPluginId, referencedProviderIds) {
         while (isActive) {
             runCatching { withContext(Dispatchers.IO) { controlPlane.snapshots() } }
                 .onSuccess { latest -> if (latest != pluginSnapshots) pluginSnapshots = latest }
             val latestProviderOwners = referencedProviderIds.mapNotNullTo(linkedSetOf()) { providerId ->
                 host.providers.resolve(providerId)?.ownerPluginId
-            } - surface.ownerPluginId
+            }.let { owners -> if (ownerPluginId == null) owners else owners - ownerPluginId }
             if (latestProviderOwners != providerPluginIds) providerPluginIds = latestProviderOwners
             delay(DRAWER_REFRESH_MS)
         }
@@ -159,10 +175,16 @@ internal fun PagePluginDrawer(
     val participants = resolvePagePluginParticipants(
         pluginSnapshots = pluginSnapshots,
         childSnapshots = childSnapshots,
-        renderedPluginIds = emptyList(),
+        renderedPluginIds = pageContext.embeddedPluginIds,
         providerPluginIds = providerPluginIds,
-        childScopes = renderedChildScopes
+        childScopes = renderedChildScopes,
+        ownerPluginId = ownerPluginId
     )
+
+    LaunchedEffect(participants.isEmpty()) {
+        if (participants.isEmpty()) expanded = false
+    }
+    if (participants.isEmpty()) return
 
     fun runMutation(target: PagePluginParticipant, operation: suspend () -> Unit) {
         scope.launch {
@@ -236,7 +258,6 @@ internal fun PagePluginDrawer(
                             approvedScopes = candidate.manifest.permissions.requestedScopes
                         )
                     )
-                    controlPlane.activateVersion(target.stableId, candidate.manifest.version)
                 }
                 is PagePluginParticipant.Child -> {
                     val temporary = File(context.cacheDir, "drawer-child-upgrade-${UUID.randomUUID()}.ailx")
@@ -254,7 +275,7 @@ internal fun PagePluginDrawer(
         }
     }
 
-    Box(modifier = modifier.fillMaxHeight()) {
+    Box(modifier = modifier.fillMaxSize()) {
         if (expanded) {
             DrawerPanel(
                 participants = participants,
@@ -269,17 +290,19 @@ internal fun PagePluginDrawer(
             )
         }
         Surface(
-            modifier = Modifier.align(Alignment.CenterEnd).width(34.dp).fillMaxHeight(),
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .width(34.dp)
+                .fillMaxHeight()
+                .clickable { expanded = !expanded },
             tonalElevation = 3.dp,
             shadowElevation = 3.dp
         ) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                IconButton(onClick = { expanded = !expanded }) {
-                    Icon(
-                        if (expanded) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowLeft,
-                        contentDescription = if (expanded) "关闭页面插件抽屉" else "打开页面插件抽屉"
-                    )
-                }
+                Icon(
+                    if (expanded) Icons.Default.KeyboardArrowRight else Icons.Default.KeyboardArrowLeft,
+                    contentDescription = if (expanded) "关闭页面插件抽屉" else "打开页面插件抽屉"
+                )
             }
         }
     }
@@ -358,19 +381,30 @@ internal fun resolvePagePluginParticipants(
     childSnapshots: List<ChildExtensionSnapshot>,
     renderedPluginIds: List<String>,
     providerPluginIds: Set<String>,
-    childScopes: Set<PageChildScope>
+    childScopes: Set<PageChildScope>,
+    ownerPluginId: String? = null
 ): List<PagePluginParticipant> {
-    val renderedOrder = renderedPluginIds.withIndex().associate { it.value to it.index }
+    val normalizedOwner = ownerPluginId?.trim()?.takeIf { it.isNotEmpty() }
+    val effectiveRenderedPluginIds = renderedPluginIds
+        .map(String::trim)
+        .filter { it.isNotEmpty() && it != normalizedOwner }
+        .distinct()
+    val renderedOrder = effectiveRenderedPluginIds.withIndex().associate { it.value to it.index }
     val pluginIds = buildSet {
-        addAll(renderedPluginIds)
-        addAll(providerPluginIds)
+        addAll(effectiveRenderedPluginIds)
+        addAll(providerPluginIds.filterNot { it == normalizedOwner })
     }
     val pluginParticipants: List<PagePluginParticipant> = pluginSnapshots
         .filter { it.plugin.pluginId in pluginIds }
         .map(PagePluginParticipant::Plugin)
+    val relatedParentPluginIds = buildSet {
+        addAll(pluginIds)
+        normalizedOwner?.let(::add)
+    }
     val childParticipants: List<PagePluginParticipant> = childSnapshots
         .filter { child ->
-            PageChildScope(child.target.parentPluginId, child.target.point) in childScopes
+            child.target.parentPluginId in relatedParentPluginIds ||
+                PageChildScope(child.target.parentPluginId, child.target.point) in childScopes
         }
         .map(PagePluginParticipant::Child)
 
@@ -401,8 +435,28 @@ private fun DrawerPanel(
     onUpdate: (PagePluginParticipant) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val rows = remember(participants) { participants.chunked(2) }
+    var query by remember { mutableStateOf("") }
+    val filteredParticipants = remember(participants, query) {
+        val needle = query.trim().lowercase()
+        if (needle.isBlank()) {
+            participants
+        } else {
+            participants.filter { participant ->
+                participant.displayName.lowercase().contains(needle) ||
+                    participant.stableId.lowercase().contains(needle) ||
+                    participant.version.lowercase().contains(needle) ||
+                    participant.typeLabel.lowercase().contains(needle)
+            }
+        }
+    }
+    val rows = remember(filteredParticipants) { filteredParticipants.chunked(2) }
     val listState = rememberLazyListState()
+
+    LaunchedEffect(query) {
+        if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+            listState.scrollToItem(0)
+        }
+    }
     Surface(
         modifier = modifier.width(320.dp).fillMaxHeight().border(
             1.dp,
@@ -426,6 +480,15 @@ private fun DrawerPanel(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                placeholder = { Text("搜索插件 / 子插件名称、ID、版本") },
+                singleLine = true
+            )
             feedback?.takeIf { it.isNotBlank() }?.let {
                 Text(
                     it,
@@ -438,7 +501,10 @@ private fun DrawerPanel(
                 DrawerScrollRail(listState, rows.size)
                 if (rows.isEmpty()) {
                     Box(Modifier.fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
-                        Text("当前页面没有可管理的插件或子插件", style = MaterialTheme.typography.bodySmall)
+                        Text(
+                            if (query.isBlank()) "当前页面没有可管理的插件或子插件" else "没有匹配的插件或子插件",
+                            style = MaterialTheme.typography.bodySmall
+                        )
                     }
                 } else {
                     LazyColumn(
@@ -493,42 +559,83 @@ private fun ParticipantCard(
             else -> Color(0xFFFFB300)
         }
     }
+    val scrollState = rememberScrollState()
     Card(
         modifier = modifier.aspectRatio(1f),
         shape = RoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(10.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(9.dp).background(statusColor, CircleShape))
-                    Spacer(Modifier.width(6.dp))
+        Column(Modifier.fillMaxSize()) {
+            Row(Modifier.fillMaxWidth().weight(1f)) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .verticalScroll(scrollState)
+                        .padding(start = 10.dp, top = 10.dp, end = 6.dp, bottom = 4.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(9.dp).background(statusColor, CircleShape))
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            participant.displayName,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                     Text(
-                        participant.displayName,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        "${participant.typeLabel} · v${participant.version}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        if (participant.enabled) "已启用" else "已禁用",
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
-                Text(
-                    "${participant.typeLabel} · v${participant.version}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    if (participant.enabled) "已启用" else "已禁用",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                ParticipantCardScrollRail(scrollState)
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            Row(
+                modifier = Modifier.padding(start = 4.dp, end = 4.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
                 TextButton(onClick = onToggle, enabled = !busy) {
                     Text(if (participant.enabled) "禁用" else "启用")
                 }
                 TextButton(onClick = onUpdate, enabled = !busy) { Text("更新") }
             }
+        }
+    }
+}
+
+@Composable
+private fun ParticipantCardScrollRail(state: androidx.compose.foundation.ScrollState) {
+    var viewportHeightPx by remember { mutableStateOf(0) }
+    BoxWithConstraints(
+        modifier = Modifier
+            .width(4.dp)
+            .fillMaxHeight()
+            .onSizeChanged { viewportHeightPx = it.height }
+            .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+    ) {
+        val maxScroll = state.maxValue
+        if (maxScroll > 0 && viewportHeightPx > 0) {
+            val contentHeightPx = viewportHeightPx + maxScroll
+            val visibleFraction = (viewportHeightPx.toFloat() / contentHeightPx.toFloat())
+                .coerceIn(0.18f, 1f)
+            val thumbHeight = maxHeight * visibleFraction
+            val progress = (state.value.toFloat() / maxScroll.toFloat()).coerceIn(0f, 1f)
+            val travel = maxHeight - thumbHeight
+            Box(
+                Modifier
+                    .width(4.dp)
+                    .height(thumbHeight)
+                    .offset(y = travel * progress)
+                    .background(
+                        MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+                        RoundedCornerShape(99.dp)
+                    )
+            )
         }
     }
 }

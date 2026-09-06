@@ -9,11 +9,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ai.limbs.plugincenter.system.v1312"
+        applicationId = "com.ai.limbs.plugincenter.system.v1313"
         minSdk = 26
         targetSdk = 34
-        versionCode = 16
-        versionName = "1.3.12"
+        versionCode = 17
+        versionName = "1.3.13"
     }
 
     compileOptions {

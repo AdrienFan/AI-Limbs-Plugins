@@ -117,9 +117,8 @@ class PluginCenterPluginUiRenderer(
         val blocks = remember(surface.documentJson) {
             document.optJSONArray("blocks").toObjectList()
         }
-        val drawerBlock = remember(surface.documentJson) {
-            blocks.lastOrNull { it.optString("type").trim().lowercase() == "page_plugin_drawer" }
-        }
+        // Legacy page_plugin_drawer markers remain accepted in plugin documents but no longer render
+        // locally. The single global drawer is mounted by AI Limbs' page accessory shell.
         val contentBlocks = remember(surface.documentJson) {
             blocks.filterNot { it.optString("type").trim().lowercase() == "page_plugin_drawer" }
         }
@@ -156,7 +155,7 @@ class PluginCenterPluginUiRenderer(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(start = 20.dp, top = 20.dp, end = if (drawerBlock == null) 20.dp else 48.dp, bottom = 20.dp),
+                        .padding(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
@@ -171,13 +170,6 @@ class PluginCenterPluginUiRenderer(
                     }
                     items(contentBlocks) { block -> components.Render(surface, block) }
                 }
-            }
-            if (drawerBlock != null) {
-                PagePluginDrawer(
-                    host = host,
-                    surface = surface,
-                    modifier = Modifier.align(Alignment.CenterEnd)
-                )
             }
         }
     }

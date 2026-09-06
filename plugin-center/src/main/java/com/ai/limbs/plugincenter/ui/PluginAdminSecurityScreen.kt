@@ -4,19 +4,27 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -45,6 +53,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -905,20 +914,35 @@ internal fun PluginAdminSecurityScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 } else {
-                    filteredBackups.forEach { backup ->
-                        BackupPluginCard(
-                            backup = backup,
-                            selected = backup.pluginId in selectedBackupIds,
-                            busy = busy,
-                            onSelectedChange = { selected ->
-                                selectedBackupIds = if (selected) {
-                                    selectedBackupIds + backup.pluginId
-                                } else {
-                                    selectedBackupIds - backup.pluginId
-                                }
-                            },
-                            onRestore = { runAdminMutation { controlPlane.restoreBackup(backup.pluginId) } },
-                            onDelete = { runAdminMutation { controlPlane.deleteBackup(backup.pluginId) } }
+                    val backupRowState = rememberLazyListState()
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        LazyRow(
+                            state = backupRowState,
+                            modifier = Modifier.fillMaxWidth(),
+                            contentPadding = PaddingValues(end = 36.dp),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            items(filteredBackups, key = { it.pluginId }) { backup ->
+                                BackupPluginCard(
+                                    backup = backup,
+                                    selected = backup.pluginId in selectedBackupIds,
+                                    busy = busy,
+                                    modifier = Modifier.width(300.dp),
+                                    onSelectedChange = { selected ->
+                                        selectedBackupIds = if (selected) {
+                                            selectedBackupIds + backup.pluginId
+                                        } else {
+                                            selectedBackupIds - backup.pluginId
+                                        }
+                                    },
+                                    onRestore = { runAdminMutation { controlPlane.restoreBackup(backup.pluginId) } },
+                                    onDelete = { runAdminMutation { controlPlane.deleteBackup(backup.pluginId) } }
+                                )
+                            }
+                        }
+                        LazyRowHorizontalScrollIndicator(
+                            state = backupRowState,
+                            totalItems = filteredBackups.size
                         )
                     }
                 }
@@ -1141,11 +1165,15 @@ private fun BackupPluginCard(
     backup: PluginBackupSnapshot,
     selected: Boolean,
     busy: Boolean,
+    modifier: Modifier = Modifier,
     onSelectedChange: (Boolean) -> Unit,
     onRestore: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    Card(
+        modifier = modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+    ) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = selected, enabled = !busy, onCheckedChange = onSelectedChange)
@@ -1194,7 +1222,9 @@ private fun ChildBackupPluginGroup(
                 style = MaterialTheme.typography.bodySmall
             )
         }
+        val rowState = rememberLazyListState()
         LazyRow(
+            state = rowState,
             modifier = Modifier.fillMaxWidth(),
             contentPadding = PaddingValues(end = 36.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -1211,6 +1241,67 @@ private fun ChildBackupPluginGroup(
                 )
             }
         }
+        LazyRowHorizontalScrollIndicator(
+            state = rowState,
+            totalItems = backups.size
+        )
+    }
+}
+
+@Composable
+private fun LazyRowHorizontalScrollIndicator(
+    state: LazyListState,
+    totalItems: Int,
+    modifier: Modifier = Modifier
+) {
+    if (totalItems <= 0) return
+    val scope = rememberCoroutineScope()
+    val visibleItems = state.layoutInfo.visibleItemsInfo
+    val visibleCount = visibleItems.size.coerceAtLeast(1)
+    val maxFirstIndex = (totalItems - visibleCount).coerceAtLeast(0)
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(7.dp)
+            .pointerInput(totalItems, visibleCount, maxFirstIndex) {
+                fun seek(x: Float) {
+                    if (maxFirstIndex <= 0 || size.width <= 0) return
+                    val target = ((x / size.width.toFloat()).coerceIn(0f, 1f) * maxFirstIndex)
+                        .toInt()
+                        .coerceIn(0, maxFirstIndex)
+                    scope.launch { state.scrollToItem(target) }
+                }
+                detectHorizontalDragGestures(
+                    onDragStart = { offset -> seek(offset.x) },
+                    onHorizontalDrag = { change, _ ->
+                        change.consume()
+                        seek(change.position.x)
+                    }
+                )
+            }
+            .background(
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
+                RoundedCornerShape(99.dp)
+            )
+    ) {
+        val visibleFraction = (visibleCount.toFloat() / totalItems.toFloat()).coerceIn(0.12f, 1f)
+        val thumbWidth = maxWidth * visibleFraction
+        val firstItemSize = visibleItems.firstOrNull()?.size?.coerceAtLeast(1) ?: 1
+        val fractionalIndex = state.firstVisibleItemIndex +
+            state.firstVisibleItemScrollOffset.toFloat() / firstItemSize.toFloat()
+        val progress = if (maxFirstIndex == 0) 0f else {
+            (fractionalIndex / maxFirstIndex.toFloat()).coerceIn(0f, 1f)
+        }
+        Box(
+            Modifier
+                .offset(x = (maxWidth - thumbWidth) * progress)
+                .width(thumbWidth)
+                .height(7.dp)
+                .background(
+                    MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
+                    RoundedCornerShape(99.dp)
+                )
+        )
     }
 }
 

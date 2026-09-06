@@ -272,14 +272,31 @@ fun PluginCenterScreen(
 
     val updateFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val targetPluginId = updateTargetId
+        updateTargetId = null
         if (uri == null || targetPluginId == null) return@rememberLauncherForActivityResult
         scope.launch {
             busy = true
             runCatching {
-                mergeCandidates(listOf(importCandidate(uri, targetPluginId)))
+                val candidate = importCandidate(uri, targetPluginId)
+                require(candidate.manifest.pluginId == targetPluginId) {
+                    "升级包的 plugin_id 与目标插件不一致"
+                }
+                controlPlane.installUri(
+                    candidate,
+                    PluginInstallOptions(
+                        allowUntrustedForDevelopment = controlPlane.developerModeEnabled(),
+                        enableAfterInstall = false,
+                        approvedScopes = candidate.manifest.permissions.requestedScopes
+                    )
+                )
+                candidate
+            }.onSuccess { candidate ->
+                refresh()
+                snackbarHostState.showSnackbar(
+                    "${candidate.manifest.display.name} 已升级到 v${candidate.manifest.version}"
+                )
             }.onFailure(::showError)
             busy = false
-            updateTargetId = null
         }
     }
 
@@ -427,6 +444,9 @@ fun PluginCenterScreen(
                         }
                     },
                     onUpdate = { choosePlugin(selected.plugin.pluginId) },
+                    onActivateVersion = { version ->
+                        runMutation { controlPlane.activateVersion(selected.plugin.pluginId, version) }
+                    },
                     onUninstall = {
                         if (selected.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
                             requestAdmin(AdminAction.Uninstall(selected.plugin.pluginId))
@@ -473,9 +493,6 @@ fun PluginCenterScreen(
                                             approvedScopes = current.manifest.permissions.requestedScopes
                                         )
                                     )
-                                    current.updateTargetId?.let { target ->
-                                        controlPlane.activateVersion(target, current.manifest.version)
-                                    }
                                 }
                                 withContext(Dispatchers.Main) { candidates = emptyList() }
                             }
@@ -493,6 +510,9 @@ fun PluginCenterScreen(
                         }
                     },
                     onUpdate = { snapshot -> choosePlugin(snapshot.plugin.pluginId) },
+                    onActivateVersion = { snapshot, version ->
+                        runMutation { controlPlane.activateVersion(snapshot.plugin.pluginId, version) }
+                    },
                     onUninstall = { snapshot ->
                         if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
                             requestAdmin(AdminAction.Uninstall(snapshot.plugin.pluginId))
@@ -672,6 +692,7 @@ private fun PluginCenterHome(
     onEnable: (PluginControlSnapshot) -> Unit,
     onDisable: (PluginControlSnapshot) -> Unit,
     onUpdate: (PluginControlSnapshot) -> Unit,
+    onActivateVersion: (PluginControlSnapshot, String) -> Unit,
     onUninstall: (PluginControlSnapshot) -> Unit,
     onBackup: (PluginControlSnapshot) -> Unit,
     onOnlineUpgradeChild: (ChildExtensionSummary) -> Unit,
@@ -843,6 +864,7 @@ private fun PluginCenterHome(
                                 onEnable = { onEnable(snapshot) },
                                 onDisable = { onDisable(snapshot) },
                                 onUpdate = { onUpdate(snapshot) },
+                                onActivateVersion = { version -> onActivateVersion(snapshot, version) },
                                 onUninstall = { onUninstall(snapshot) },
                                 onBackup = { onBackup(snapshot) }
                             )
@@ -919,6 +941,7 @@ private fun PluginCenterHome(
                                 onEnable = { onEnable(snapshot) },
                                 onDisable = { onDisable(snapshot) },
                                 onUpdate = { onUpdate(snapshot) },
+                                onActivateVersion = { version -> onActivateVersion(snapshot, version) },
                                 onUninstall = { onUninstall(snapshot) },
                                 onBackup = { onBackup(snapshot) }
                             )
@@ -1063,12 +1086,15 @@ private fun PluginCard(
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onUpdate: () -> Unit,
+    onActivateVersion: (String) -> Unit,
     onUninstall: () -> Unit,
     onBackup: () -> Unit
 ) {
     val manifest = snapshot.plugin.activeManifest
     val state = snapshot.plugin.persistentState
     val currentVersion = state?.activeVersion
+    val latestInstalledVersion = snapshot.plugin.versions.lastOrNull()
+    val hasInactiveLatestVersion = latestInstalledVersion != null && latestInstalledVersion != currentVersion
     val backupVersion = snapshot.plugin.backup?.version
     val canBackup = currentVersion != null && backupVersion != currentVersion
     val cardModifier = if (onToggleChildren != null) {
@@ -1107,10 +1133,17 @@ private fun PluginCard(
                 }
             }
             Text(
-                "v${state?.activeVersion ?: "-"} · ${manifest?.activationMode?.wireName ?: "-"} · ${manifest?.runtime?.kind ?: "-"}",
+                "当前运行：v${currentVersion ?: "-"} · ${manifest?.activationMode?.wireName ?: "-"} · ${manifest?.runtime?.kind ?: "-"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            latestInstalledVersion?.let { latest ->
+                Text(
+                    "已安装最新版：v$latest${if (hasInactiveLatestVersion) " · 尚未运行" else " · 当前运行"}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (hasInactiveLatestVersion) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Text(
                 usageSummary(snapshot),
                 style = MaterialTheme.typography.bodySmall,
@@ -1140,6 +1173,11 @@ private fun PluginCard(
                     TextButton(onClick = onEnable) { Text("启用") }
                 }
                 TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
+                if (hasInactiveLatestVersion) {
+                    TextButton(onClick = { onActivateVersion(requireNotNull(latestInstalledVersion)) }) {
+                        Text("切换到 v$latestInstalledVersion")
+                    }
+                }
                 TextButton(onClick = onUpdate) { Text("升级") }
                 TextButton(onClick = onOnlineUpgrade, enabled = parentOnlineUpgradeAvailable(snapshot)) { Text("在线升级") }
                 if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
@@ -1347,13 +1385,17 @@ private fun PluginDetail(
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onUpdate: () -> Unit,
+    onActivateVersion: (String) -> Unit,
     onUninstall: () -> Unit,
     onBackup: () -> Unit,
     onRollback: () -> Unit
 ) {
     val manifest = snapshot.plugin.activeManifest
     val state = snapshot.plugin.persistentState
-    val canBackup = state?.activeVersion != null && snapshot.plugin.backup?.version != state.activeVersion
+    val currentVersion = state?.activeVersion
+    val latestInstalledVersion = snapshot.plugin.versions.lastOrNull()
+    val hasInactiveLatestVersion = latestInstalledVersion != null && latestInstalledVersion != currentVersion
+    val canBackup = currentVersion != null && snapshot.plugin.backup?.version != currentVersion
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -1365,7 +1407,8 @@ private fun PluginDetail(
             Text(manifest?.display?.name ?: snapshot.plugin.pluginId, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         }
         manifest?.display?.description?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        DetailLine("版本", state?.activeVersion ?: "-")
+        DetailLine("当前运行版本", currentVersion ?: "-")
+        DetailLine("已安装最新版", latestInstalledVersion ?: "-")
         DetailLine("状态", state?.lastState?.name ?: "-")
         state?.lastError?.takeIf { it.isNotBlank() }?.let { DetailLine("状态说明", it) }
         DetailLine("运行时", manifest?.runtime?.kind ?: "-")
@@ -1415,7 +1458,14 @@ private fun PluginDetail(
             OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
         }
         Text("版本管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-        DetailLine("当前版本", state?.activeVersion ?: "-")
+        DetailLine("当前运行", currentVersion ?: "-")
+        DetailLine("已安装最新版", latestInstalledVersion ?: "-")
+        if (hasInactiveLatestVersion) {
+            OutlinedButton(
+                onClick = { onActivateVersion(requireNotNull(latestInstalledVersion)) },
+                enabled = !busy
+            ) { Text("切换到 v$latestInstalledVersion") }
+        }
         DetailLine("上一版本", state?.previousVersion ?: "无")
         if (state?.previousVersion != null) {
             OutlinedButton(onClick = onRollback, enabled = !busy) { Text("回滚") }
