@@ -348,7 +348,7 @@ internal fun PagePluginDrawer(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         if (expanded) {
-            val drawerCoveredWidth = 320.dp + 34.dp
+            val drawerCoveredWidth = 320.dp + 24.dp
             val uncoveredWidth = (maxWidth - drawerCoveredWidth).coerceAtLeast(0.dp)
             if (uncoveredWidth > 0.dp) {
                 Box(
@@ -370,7 +370,7 @@ internal fun PagePluginDrawer(
                     updateTarget = target
                     updateLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                 },
-                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 34.dp)
+                modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)
             )
         }
         Surface(
