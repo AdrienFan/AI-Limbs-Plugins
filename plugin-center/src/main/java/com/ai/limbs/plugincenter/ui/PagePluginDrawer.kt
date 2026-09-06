@@ -80,6 +80,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 private const val DRAWER_REFRESH_MS = 350L
+private const val DRAWER_MEMBERSHIP_PREFS = "plugin_center_page_drawer_membership_v1"
+private const val PLUGIN_MEMBER_PREFIX = "plugin:"
+private const val CHILD_MEMBER_PREFIX = "child:"
 
 internal sealed interface PagePluginParticipant {
     val stableId: String
@@ -134,9 +137,18 @@ internal fun PagePluginDrawer(
         else renderedChildScopes(ownerPluginId, documentJson)
     }
 
+    val membershipPrefs = remember(context.applicationContext) {
+        context.applicationContext.getSharedPreferences(DRAWER_MEMBERSHIP_PREFS, 0)
+    }
+    val membershipPrefsKey = remember(pageContext.pageId) { "page:${pageContext.pageId}" }
+    var retainedParticipantKeys by remember(pageContext.pageId) {
+        mutableStateOf(membershipPrefs.getStringSet(membershipPrefsKey, emptySet()).orEmpty().toSet())
+    }
     var expanded by remember(pageContext.pageId) { mutableStateOf(false) }
     var pluginSnapshots by remember { mutableStateOf<List<PluginControlSnapshot>>(emptyList()) }
     var childSnapshots by remember { mutableStateOf<List<ChildExtensionSnapshot>>(emptyList()) }
+    var pluginSnapshotsLoaded by remember(pageContext.pageId) { mutableStateOf(false) }
+    var childSnapshotsLoaded by remember(pageContext.pageId) { mutableStateOf(false) }
     var providerPluginIds by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
     var feedback by remember(pageContext.pageId) { mutableStateOf<String?>(null) }
     var busyIds by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
@@ -157,15 +169,22 @@ internal fun PagePluginDrawer(
     LaunchedEffect(hub) {
         if (hub == null) {
             childSnapshots = emptyList()
+            childSnapshotsLoaded = false
             return@LaunchedEffect
         }
-        hub.snapshots().collect { latest -> childSnapshots = latest }
+        hub.snapshots().collect { latest ->
+            childSnapshots = latest
+            childSnapshotsLoaded = true
+        }
     }
 
     LaunchedEffect(controlPlane, pageContext.pageId, ownerPluginId, referencedProviderIds) {
         while (isActive) {
             runCatching { withContext(Dispatchers.IO) { controlPlane.snapshots() } }
-                .onSuccess { latest -> if (latest != pluginSnapshots) pluginSnapshots = latest }
+                .onSuccess { latest ->
+                    if (latest != pluginSnapshots) pluginSnapshots = latest
+                    pluginSnapshotsLoaded = true
+                }
             val latestProviderOwners = referencedProviderIds.mapNotNullTo(linkedSetOf()) { providerId ->
                 host.providers.resolve(providerId)?.ownerPluginId
             }.let { owners -> if (ownerPluginId == null) owners else owners - ownerPluginId }
@@ -174,13 +193,63 @@ internal fun PagePluginDrawer(
         }
     }
 
-    val participants = resolvePagePluginParticipants(
+    val directlyRenderedParticipants = resolvePagePluginParticipants(
         pluginSnapshots = pluginSnapshots,
         childSnapshots = childSnapshots,
         renderedPluginIds = pageContext.embeddedPluginIds,
         providerPluginIds = providerPluginIds,
         childScopes = renderedChildScopes,
         ownerPluginId = ownerPluginId
+    )
+    LaunchedEffect(
+        pageContext.pageId,
+        directlyRenderedParticipants,
+        pluginSnapshots,
+        childSnapshots,
+        pluginSnapshotsLoaded,
+        childSnapshotsLoaded
+    ) {
+        val directKeys = directlyRenderedParticipants.mapTo(linkedSetOf(), ::participantMembershipKey)
+        val pluginsById = pluginSnapshots.associateBy { it.plugin.pluginId }
+        val childrenById = childSnapshots.associateBy { it.extensionId }
+        val nextKeys = buildSet {
+            addAll(directKeys)
+            retainedParticipantKeys.forEach { key ->
+                when {
+                    key.startsWith(PLUGIN_MEMBER_PREFIX) -> {
+                        if (!pluginSnapshotsLoaded) {
+                            add(key)
+                        } else {
+                            pluginsById[key.removePrefix(PLUGIN_MEMBER_PREFIX)]
+                                ?.takeIf(::retainPluginWhenNotRendered)
+                                ?.let { add(key) }
+                        }
+                    }
+                    key.startsWith(CHILD_MEMBER_PREFIX) -> {
+                        if (!childSnapshotsLoaded) {
+                            add(key)
+                        } else {
+                            childrenById[key.removePrefix(CHILD_MEMBER_PREFIX)]
+                                ?.takeIf(::retainChildWhenNotRendered)
+                                ?.let { add(key) }
+                        }
+                    }
+                }
+            }
+        }
+        if (nextKeys != retainedParticipantKeys) {
+            retainedParticipantKeys = nextKeys
+            membershipPrefs.edit().putStringSet(membershipPrefsKey, nextKeys).apply()
+        }
+    }
+    val participants = resolvePagePluginParticipants(
+        pluginSnapshots = pluginSnapshots,
+        childSnapshots = childSnapshots,
+        renderedPluginIds = pageContext.embeddedPluginIds,
+        providerPluginIds = providerPluginIds,
+        childScopes = renderedChildScopes,
+        ownerPluginId = ownerPluginId,
+        retainedParticipantKeys = retainedParticipantKeys
     )
 
     LaunchedEffect(participants.isEmpty()) {
@@ -307,7 +376,7 @@ internal fun PagePluginDrawer(
         Surface(
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .width(34.dp)
+                .width(24.dp)
                 .fillMaxHeight()
                 .clickable { expanded = !expanded },
             tonalElevation = 3.dp,
@@ -377,6 +446,26 @@ internal fun PagePluginDrawer(
     }
 }
 
+private fun pluginMembershipKey(pluginId: String): String = PLUGIN_MEMBER_PREFIX + pluginId
+
+private fun childMembershipKey(extensionId: String): String = CHILD_MEMBER_PREFIX + extensionId
+
+private fun participantMembershipKey(participant: PagePluginParticipant): String = when (participant) {
+    is PagePluginParticipant.Plugin -> pluginMembershipKey(participant.stableId)
+    is PagePluginParticipant.Child -> childMembershipKey(participant.stableId)
+}
+
+private fun retainPluginWhenNotRendered(snapshot: PluginControlSnapshot): Boolean {
+    val state = snapshot.plugin.persistentState ?: return true
+    return !state.enabled ||
+        state.lastState.name == "DISABLED" ||
+        snapshot.health.name == "FAILED" ||
+        state.lastState.name != "ACTIVE"
+}
+
+private fun retainChildWhenNotRendered(snapshot: ChildExtensionSnapshot): Boolean =
+    !snapshot.enabled || snapshot.lifecycle.name != "ACTIVE"
+
 /**
  * One child-extension surface that is actually present on the current page layer.
  * The pair is exact so identically named extension points on different plugins never bleed together.
@@ -397,7 +486,8 @@ internal fun resolvePagePluginParticipants(
     renderedPluginIds: List<String>,
     providerPluginIds: Set<String>,
     childScopes: Set<PageChildScope>,
-    ownerPluginId: String? = null
+    ownerPluginId: String? = null,
+    retainedParticipantKeys: Set<String> = emptySet()
 ): List<PagePluginParticipant> {
     val normalizedOwner = ownerPluginId?.trim()?.takeIf { it.isNotEmpty() }
     val effectiveRenderedPluginIds = renderedPluginIds
@@ -410,16 +500,17 @@ internal fun resolvePagePluginParticipants(
         addAll(providerPluginIds.filterNot { it == normalizedOwner })
     }
     val pluginParticipants: List<PagePluginParticipant> = pluginSnapshots
-        .filter { it.plugin.pluginId in pluginIds }
+        .filter { snapshot ->
+            snapshot.plugin.pluginId in pluginIds ||
+                (pluginMembershipKey(snapshot.plugin.pluginId) in retainedParticipantKeys &&
+                    retainPluginWhenNotRendered(snapshot))
+        }
         .map(PagePluginParticipant::Plugin)
-    val relatedParentPluginIds = buildSet {
-        addAll(pluginIds)
-        normalizedOwner?.let(::add)
-    }
     val childParticipants: List<PagePluginParticipant> = childSnapshots
         .filter { child ->
-            child.target.parentPluginId in relatedParentPluginIds ||
-                PageChildScope(child.target.parentPluginId, child.target.point) in childScopes
+            PageChildScope(child.target.parentPluginId, child.target.point) in childScopes ||
+                (childMembershipKey(child.extensionId) in retainedParticipantKeys &&
+                    retainChildWhenNotRendered(child))
         }
         .map(PagePluginParticipant::Child)
 
@@ -568,11 +659,14 @@ private fun ParticipantCard(
     modifier: Modifier = Modifier
 ) {
     val statusColor = when (participant) {
-        is PagePluginParticipant.Plugin -> when {
-            !participant.enabled -> Color(0xFF757575)
-            participant.snapshot.plugin.persistentState?.lastState?.name == "ACTIVE" -> Color(0xFF00C853)
-            participant.snapshot.plugin.persistentState?.lastState?.name == "FAILED" -> Color(0xFFD32F2F)
-            else -> Color(0xFFFFB300)
+        is PagePluginParticipant.Plugin -> {
+            val state = participant.snapshot.plugin.persistentState
+            when {
+                !participant.enabled || state?.lastState?.name == "DISABLED" -> Color(0xFF757575)
+                participant.snapshot.health.name == "FAILED" || state?.lastState?.name == "FAILED" -> Color(0xFFD32F2F)
+                state?.lastState?.name == "ACTIVE" -> Color(0xFF00C853)
+                else -> Color(0xFFFFB300)
+            }
         }
         is PagePluginParticipant.Child -> when {
             !participant.enabled -> Color(0xFF757575)

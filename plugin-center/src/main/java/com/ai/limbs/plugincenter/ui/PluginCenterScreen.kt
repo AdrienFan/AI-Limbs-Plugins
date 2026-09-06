@@ -116,6 +116,7 @@ private sealed interface AdminAction {
     data object OpenSettings : AdminAction
     data class DisableSystem(val pluginId: String) : AdminAction
     data class Uninstall(val pluginId: String) : AdminAction
+    data class UninstallChild(val child: ChildExtensionSummary) : AdminAction
 }
 
 private class PluginCenterHomeSessionState {
@@ -194,6 +195,7 @@ fun PluginCenterScreen(
             AdminAction.OpenSettings -> showAdminSettings = true
             is AdminAction.DisableSystem -> disableSystemTargetId = action.pluginId
             is AdminAction.Uninstall -> uninstallTargetId = action.pluginId
+            is AdminAction.UninstallChild -> uninstallChildTarget = action.child
         }
     }
 
@@ -204,6 +206,7 @@ fun PluginCenterScreen(
             val target = snapshots.firstOrNull { it.plugin.pluginId == action.pluginId }
             target == null || isSystemPlugin(target)
         }
+        is AdminAction.UninstallChild -> false
     }
 
     fun requestAdmin(action: AdminAction) {
@@ -538,7 +541,7 @@ fun PluginCenterScreen(
                         runMutation { controlPlane.backupChildExtension(child.extensionId) }
                     },
                     onJumpChild = ::jumpToChild,
-                    onUninstallChild = { child -> uninstallChildTarget = child }
+                    onUninstallChild = { child -> requestAdmin(AdminAction.UninstallChild(child)) }
                 )
             }
             if (busy) {
@@ -628,6 +631,7 @@ fun PluginCenterScreen(
                 AdminAction.OpenSettings -> "管理员验证"
                 is AdminAction.DisableSystem -> "验证后允许禁用系统插件"
                 is AdminAction.Uninstall -> "验证后允许卸载插件"
+                is AdminAction.UninstallChild -> "验证后允许卸载子插件"
                 null -> "管理员验证"
             },
             adminSecurity = adminSecurity,
