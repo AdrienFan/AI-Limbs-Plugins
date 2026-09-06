@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +56,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.plugins.system.SystemPageAccessoryRendererV1
 import com.ai.assistance.operit.plugins.system.SystemPageContextV1
@@ -275,8 +277,21 @@ internal fun PagePluginDrawer(
         }
     }
 
-    Box(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         if (expanded) {
+            val drawerCoveredWidth = 320.dp + 34.dp
+            val uncoveredWidth = (maxWidth - drawerCoveredWidth).coerceAtLeast(0.dp)
+            if (uncoveredWidth > 0.dp) {
+                Box(
+                    Modifier
+                        .align(Alignment.CenterStart)
+                        .width(uncoveredWidth)
+                        .fillMaxHeight()
+                        .pointerInput(pageContext.pageId) {
+                            detectTapGestures(onTap = { expanded = false })
+                        }
+                )
+            }
             DrawerPanel(
                 participants = participants,
                 busyIds = busyIds,
@@ -486,7 +501,14 @@ private fun DrawerPanel(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 6.dp),
-                placeholder = { Text("搜索插件 / 子插件名称、ID、版本") },
+                placeholder = {
+                    Text(
+                        "搜索名称、ID、版本",
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 singleLine = true
             )
             feedback?.takeIf { it.isNotBlank() }?.let {
