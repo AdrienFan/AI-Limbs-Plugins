@@ -61,6 +61,7 @@ internal fun TerminalWorkbenchBlock(
     block: JSONObject
 ) {
     val providerId = block.stringRequired("provider_id")
+    val actionCapabilityId = block.stringRequired("action_capability_id")
     val initial = remember(providerId) { host.providers.resolve(providerId) }
     val binding by host.providers.observe(providerId).collectAsState(initial = initial)
     val provider = binding
@@ -106,10 +107,14 @@ internal fun TerminalWorkbenchBlock(
         scope.launch {
             busyEvent = eventId
             try {
-                val raw = provider.perform(eventId, payload.toString())
-                val result = runCatching { JSONObject(raw) }.getOrNull()
-                feedback = result?.optString("message")?.takeIf { it.isNotBlank() }
-                if (result?.optBoolean("clear_input") == true) command = ""
+                val result = surface.actions.invokeCapability(
+                    actionCapabilityId,
+                    JSONObject()
+                        .put("event_id", eventId)
+                        .put("payload", JSONObject(payload.toString()))
+                )
+                feedback = result.optString("message").takeIf { it.isNotBlank() }
+                if (result.optBoolean("clear_input")) command = ""
             } catch (error: Throwable) {
                 feedback = "操作失败：${error.message ?: "未知错误"}"
             } finally {
