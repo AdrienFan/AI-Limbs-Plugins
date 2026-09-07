@@ -26,7 +26,7 @@ internal class PluginCenterDelegatedGateway(
         requireHub(caller)
         return when (operation.trim().lowercase()) {
             "verify_child_publisher" -> verifyChildPublisher(parameters)
-            "invoke_child_capability" -> invokeChildCapability(caller, parameters)
+            "invoke_child_capability" -> invokeChildCapability(parameters)
             else -> error("Unsupported Plugin Center delegated gateway operation: $operation")
         }
     }
@@ -50,14 +50,10 @@ internal class PluginCenterDelegatedGateway(
             .put("purpose", TRUST_PURPOSE_CHILD_EXTENSION)
     }
 
-    private suspend fun invokeChildCapability(
-        caller: SystemPluginServiceCallerV2,
-        parameters: JSONObject
-    ): JSONObject {
+    private suspend fun invokeChildCapability(parameters: JSONObject): JSONObject {
+        // The authenticated caller is Plugin Extension Hub, which acts as the trusted broker.
+        // Capability authority belongs to the active parent plugin that published the extension point.
         val parentPluginId = parameters.requiredText("parent_plugin_id")
-        require(parentPluginId == caller.pluginId) {
-            "Delegated parent identity does not match the authenticated caller"
-        }
         parameters.requiredText("extension_id")
         val capabilityId = parameters.requiredText("capability_id")
         require(!capabilityId.startsWith("kernel.plugin.trust")) {
@@ -65,7 +61,7 @@ internal class PluginCenterDelegatedGateway(
         }
         val capabilityParameters = parameters.optJSONObject("parameters") ?: JSONObject()
         return host.delegatedCapabilities.invokeAsActivePlugin(
-            pluginId = caller.pluginId,
+            pluginId = parentPluginId,
             capabilityId = capabilityId,
             parameters = JSONObject(capabilityParameters.toString())
         )
