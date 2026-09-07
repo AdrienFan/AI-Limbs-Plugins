@@ -87,6 +87,22 @@ private data class AdminBackupInventory(
     val installedPluginIds: Set<String>
 )
 
+private const val PERIPHERAL_HOST_PRIMITIVE_PREFIX = "host.peripheral."
+
+private fun HostPrimitiveSnapshot.matchesQuery(normalizedQuery: String): Boolean {
+    if (normalizedQuery.isBlank()) return true
+    val primitiveDefinition = definition
+    return listOf(
+        "HP-${primitiveDefinition.number.toString().padStart(3, '0')}",
+        primitiveDefinition.id,
+        primitiveDefinition.title,
+        primitiveDefinition.description,
+        primitiveDefinition.boundary,
+        primitiveDefinition.maturity.name,
+        primitiveDefinition.exposure.name
+    ).any { it.lowercase().contains(normalizedQuery) }
+}
+
 @Composable
 internal fun AdminSetupDialog(
     adminSecurity: AdminSecurityFacade,
@@ -251,6 +267,8 @@ internal fun PluginAdminSecurityScreen(
     var developerMode by remember { mutableStateOf(controlPlane.developerModeEnabled()) }
     var developerDiscovery by remember { mutableStateOf(controlPlane.developerDiscoveryEnabled()) }
     var primitives by remember { mutableStateOf(controlPlane.hostPrimitiveSnapshots()) }
+    var peripheralPrimitivesExpanded by remember { mutableStateOf(false) }
+    var peripheralPrimitiveQuery by remember { mutableStateOf("") }
     var primitivesExpanded by remember { mutableStateOf(false) }
     var primitiveQuery by remember { mutableStateOf("") }
     var surfaces by remember { mutableStateOf(controlPlane.hostSurfaceSnapshots()) }
@@ -413,22 +431,25 @@ internal fun PluginAdminSecurityScreen(
         authFrequency = adminSecurity.authFrequency()
     }
 
-    val normalizedPrimitiveQuery = primitiveQuery.trim().lowercase()
-    val filteredPrimitives = remember(primitives, normalizedPrimitiveQuery) {
-        if (normalizedPrimitiveQuery.isBlank()) primitives else primitives.filter { item ->
-            val definition = item.definition
-            listOf(
-                "HP-${definition.number.toString().padStart(3, '0')}",
-                definition.id,
-                definition.title,
-                definition.description,
-                definition.boundary,
-                definition.maturity.name,
-                definition.exposure.name
-            ).any { it.lowercase().contains(normalizedPrimitiveQuery) }
-        }
+    val peripheralPrimitives = remember(primitives) {
+        primitives.filter { it.definition.id.startsWith(PERIPHERAL_HOST_PRIMITIVE_PREFIX) }
+    }
+    val standardPrimitives = remember(primitives) {
+        primitives.filterNot { it.definition.id.startsWith(PERIPHERAL_HOST_PRIMITIVE_PREFIX) }
     }
 
+    val normalizedPeripheralPrimitiveQuery = peripheralPrimitiveQuery.trim().lowercase()
+    val filteredPeripheralPrimitives = remember(peripheralPrimitives, normalizedPeripheralPrimitiveQuery) {
+        peripheralPrimitives.filter { it.matchesQuery(normalizedPeripheralPrimitiveQuery) }
+    }
+    val filteredToggleablePeripheralPrimitives = filteredPeripheralPrimitives.filter { it.policyAllowed != null }
+    val allFilteredPeripheralPrimitivesAllowed = filteredToggleablePeripheralPrimitives.isNotEmpty() &&
+        filteredToggleablePeripheralPrimitives.all { it.policyAllowed == true }
+
+    val normalizedPrimitiveQuery = primitiveQuery.trim().lowercase()
+    val filteredPrimitives = remember(standardPrimitives, normalizedPrimitiveQuery) {
+        standardPrimitives.filter { it.matchesQuery(normalizedPrimitiveQuery) }
+    }
     val filteredToggleablePrimitives = filteredPrimitives.filter { it.policyAllowed != null }
     val allFilteredPrimitivesAllowed = filteredToggleablePrimitives.isNotEmpty() &&
         filteredToggleablePrimitives.all { it.policyAllowed == true }
@@ -744,8 +765,70 @@ internal fun PluginAdminSecurityScreen(
             }
 
             PluginCollectionSection(
+                title = "外设宿主原语",
+                totalCount = peripheralPrimitives.size,
+                matchedCount = filteredPeripheralPrimitives.size,
+                query = peripheralPrimitiveQuery,
+                onQueryChange = { peripheralPrimitiveQuery = it },
+                expanded = peripheralPrimitivesExpanded,
+                onExpandedChange = { peripheralPrimitivesExpanded = it },
+                searchPlaceholder = "搜索外设 / host.peripheral.*@1",
+                headerControl = {
+                    DeveloperDiscoveryButton(
+                        enabled = developerMode && !busy,
+                        discoveryEnabled = developerDiscovery,
+                        onToggle = { runAdminMutation { controlPlane.setDeveloperDiscoveryEnabled(!developerDiscovery) } }
+                    )
+                }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "显示 ${filteredPeripheralPrimitives.size} / ${peripheralPrimitives.size}",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedButton(
+                        enabled = !busy && filteredToggleablePeripheralPrimitives.isNotEmpty(),
+                        onClick = {
+                            val targetPrimitives = filteredToggleablePeripheralPrimitives
+                            val targetAllowed = !allFilteredPeripheralPrimitivesAllowed
+                            runAdminMutation {
+                                targetPrimitives.forEach { primitive ->
+                                    controlPlane.setHostPrimitiveAllowed(primitive.definition.id, targetAllowed)
+                                }
+                            }
+                        }
+                    ) {
+                        Text(
+                            when {
+                                normalizedPeripheralPrimitiveQuery.isBlank() && allFilteredPeripheralPrimitivesAllowed -> "取消全选"
+                                normalizedPeripheralPrimitiveQuery.isBlank() -> "全选"
+                                allFilteredPeripheralPrimitivesAllowed -> "取消选择结果"
+                                else -> "全选结果"
+                            }
+                        )
+                    }
+                    if (peripheralPrimitiveQuery.isNotBlank()) {
+                        TextButton(onClick = { peripheralPrimitiveQuery = "" }) { Text("清除搜索") }
+                    }
+                }
+                if (filteredPeripheralPrimitives.isEmpty()) {
+                    Text("没有匹配的外设宿主原语", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    HostPrimitiveCards(filteredPeripheralPrimitives, busy) { primitive, allowed ->
+                        runAdminMutation { controlPlane.setHostPrimitiveAllowed(primitive.definition.id, allowed) }
+                    }
+                }
+            }
+
+            Divider()
+            PluginCollectionSection(
                 title = "Host Primitives",
-                totalCount = primitives.size,
+                totalCount = standardPrimitives.size,
                 matchedCount = filteredPrimitives.size,
                 query = primitiveQuery,
                 onQueryChange = { primitiveQuery = it },
@@ -766,7 +849,7 @@ internal fun PluginAdminSecurityScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        "显示 ${filteredPrimitives.size} / ${primitives.size}",
+                        "显示 ${filteredPrimitives.size} / ${standardPrimitives.size}",
                         modifier = Modifier.weight(1f),
                         style = MaterialTheme.typography.bodySmall
                     )

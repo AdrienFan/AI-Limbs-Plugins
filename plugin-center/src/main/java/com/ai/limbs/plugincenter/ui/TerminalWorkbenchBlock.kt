@@ -54,7 +54,10 @@ import androidx.compose.ui.unit.sp
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.SystemPluginUiSurfaceV2
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -117,6 +120,23 @@ internal fun TerminalWorkbenchBlock(
     var feedback by remember(providerId) { mutableStateOf<String?>(null) }
     var busyEvent by remember(providerId) { mutableStateOf<String?>(null) }
     var configExpanded by remember(providerId) { mutableStateOf(false) }
+
+    val uiAttachEvent = events.optString("ui_attach").trim()
+    val uiDetachEvent = events.optString("ui_detach").trim()
+    LaunchedEffect(providerId, provider, uiAttachEvent, uiDetachEvent) {
+        val attached =
+            uiAttachEvent.isNotBlank() &&
+                runCatching { provider.perform(uiAttachEvent) }.isSuccess
+        try {
+            awaitCancellation()
+        } finally {
+            if (attached && uiDetachEvent.isNotBlank()) {
+                withContext(NonCancellable) {
+                    runCatching { provider.perform(uiDetachEvent) }
+                }
+            }
+        }
+    }
 
     fun invoke(eventKey: String, payload: JSONObject = JSONObject()) {
         val eventId = events.optString(eventKey).trim()
