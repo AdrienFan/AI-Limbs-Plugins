@@ -1,5 +1,7 @@
 package com.ai.limbs.plugin.runtime
 
+import android.content.Context
+import android.view.View
 import java.io.File
 import kotlinx.coroutines.flow.StateFlow
 
@@ -18,6 +20,21 @@ import kotlinx.coroutines.flow.StateFlow
 interface InProcessUiStateProvider {
     val stateJson: StateFlow<String?>
     suspend fun perform(eventId: String, payloadJson: String = "{}"): String
+}
+
+interface InProcessPageProvider {
+    fun createView(context: Context, sharedUi: InProcessSharedUiHost): View
+}
+
+interface InProcessSharedUiHost {
+    fun supports(componentId: String): Boolean
+    fun createComponent(componentId: String, parametersJson: String = "{}"): View
+}
+
+object InProcessSharedUiComponentIds {
+    const val CHILD_EXTENSION_INSTALLER = "plugin_center.shared.child_extension_installer"
+    const val CHILD_EXTENSION_SELECTOR = "plugin_center.shared.child_extension_selector"
+    const val CHILD_EXTENSION_LIST = "plugin_center.shared.child_extension_list"
 }
 
 /**
