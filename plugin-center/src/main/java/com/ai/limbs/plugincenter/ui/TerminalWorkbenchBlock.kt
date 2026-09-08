@@ -20,6 +20,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
@@ -27,6 +31,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -47,6 +52,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -109,6 +115,10 @@ internal fun TerminalWorkbenchBlock(
     val inputEnabled = state.optBoolean("input_enabled")
     val shareOnline = state.optBoolean("share_online")
     val localControlsEnabled = state.optBoolean("local_controls_enabled")
+    val idleMode = state.optString("idle_mode", "KEEP_RUNNING")
+    val idleTimeoutMinutes = state.optInt("idle_timeout_minutes", -1).takeIf { it > 0 }
+    val idleShutdownEnabled = idleMode != "KEEP_RUNNING"
+    val idleDisplay = idleTimeoutMinutes?.let { "${it}m" } ?: "∞"
     val legacy06478 = block.optString("metrics_profile") == Legacy06478MetricsProfile
     val density = LocalDensity.current
     val consoleFontSize = if (legacy06478) with(density) { 42f.toSp() } else 15.sp
@@ -119,7 +129,11 @@ internal fun TerminalWorkbenchBlock(
     var command by remember(providerId, activeTabId) { mutableStateOf("") }
     var feedback by remember(providerId) { mutableStateOf<String?>(null) }
     var busyEvent by remember(providerId) { mutableStateOf<String?>(null) }
-    var configExpanded by remember(providerId) { mutableStateOf(false) }
+    var idleExpanded by remember(providerId) { mutableStateOf(false) }
+    var showCustomIdleDialog by remember(providerId) { mutableStateOf(false) }
+    var showEnvironmentConfigPage by remember(providerId) { mutableStateOf(false) }
+    var customIdleMinutes by remember(providerId) { mutableStateOf("15") }
+    val addTabEnabled = ubuntuRunning && busyEvent == null
 
     val uiAttachEvent = events.optString("ui_attach").trim()
     val uiDetachEvent = events.optString("ui_detach").trim()
@@ -136,6 +150,14 @@ internal fun TerminalWorkbenchBlock(
                 }
             }
         }
+    }
+
+    if (showEnvironmentConfigPage) {
+        TerminalEnvironmentConfigPage(
+            legacy06478 = legacy06478,
+            onBack = { showEnvironmentConfigPage = false }
+        )
+        return
     }
 
     fun invoke(eventKey: String, payload: JSONObject = JSONObject()) {
@@ -161,6 +183,7 @@ internal fun TerminalWorkbenchBlock(
     }
 
     val consoleScroll = rememberScrollState()
+    val consoleHorizontalScroll = rememberScrollState()
     LaunchedEffect(consoleContent) {
         consoleScroll.scrollTo(consoleScroll.maxValue)
     }
@@ -215,7 +238,7 @@ internal fun TerminalWorkbenchBlock(
                     text = "+",
                     textColor = Color.White,
                     fontSize = 20.sp,
-                    enabled = busyEvent == null,
+                    enabled = addTabEnabled,
                     onClick = { invoke("add_tab") }
                 )
             } else {
@@ -230,10 +253,14 @@ internal fun TerminalWorkbenchBlock(
                     )
                 }
                 TextButton(
-                    enabled = busyEvent == null,
+                    enabled = addTabEnabled,
                     onClick = { invoke("add_tab") }
                 ) {
-                    Text("+", color = Color.White, fontSize = 28.sp)
+                    Text(
+                        "+",
+                        color = if (addTabEnabled) Color.White else Color.Gray,
+                        fontSize = 28.sp
+                    )
                 }
             }
         }
@@ -249,11 +276,15 @@ internal fun TerminalWorkbenchBlock(
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(consoleScroll)
+                        .horizontalScroll(consoleHorizontalScroll)
                         .padding(horizontal = consoleHorizontalPadding, vertical = consoleVerticalPadding),
                     color = Color.White,
                     fontFamily = FontFamily.Monospace,
                     fontSize = consoleFontSize,
-                    lineHeight = consoleLineHeight
+                    lineHeight = consoleLineHeight,
+                    // Terminal rows already have fixed cell boundaries. Compose soft wrapping
+                    // would split ASCII art, tables, prompts, and other column-aligned output.
+                    softWrap = false
                 )
             }
         }
@@ -291,32 +322,39 @@ internal fun TerminalWorkbenchBlock(
                     enabled = localControlsEnabled && sessionActive && busyEvent == null,
                     onClick = { invoke("ctrl_c") }
                 )
+                Box(modifier = Modifier.weight(1f))
                 LegacyToolbarButton(
-                    label = if (ubuntuRunning) "停止 Ubuntu" else "启动 Ubuntu",
+                    label = if (ubuntuRunning) "停止 Ubuntu" else "启动系统",
                     enabled = localControlsEnabled && busyEvent == null,
                     containerColor = if (ubuntuRunning) Color(0xFF7A3434) else Color(0xFF245B3A),
                     onClick = { invoke(if (ubuntuRunning) "stop" else "start") }
                 )
                 Box {
-                    LegacyToolbarButton(
-                        label = "环境配置",
+                    TerminalIdleButton(
                         enabled = localControlsEnabled && busyEvent == null,
-                        onClick = { configExpanded = true }
+                        idleShutdownEnabled = idleShutdownEnabled,
+                        displayText = idleDisplay,
+                        legacy06478 = true,
+                        onClick = { idleExpanded = true }
                     )
                     TerminalIdleDropdown(
-                        expanded = configExpanded,
-                        onDismiss = { configExpanded = false },
+                        expanded = idleExpanded,
+                        onDismiss = { idleExpanded = false },
                         onSelect = { mode ->
-                            configExpanded = false
-                            invoke("set_idle", JSONObject().put("mode", mode))
+                            idleExpanded = false
+                            if (mode == "CUSTOM") {
+                                customIdleMinutes = (idleTimeoutMinutes ?: 15).toString()
+                                showCustomIdleDialog = true
+                            } else {
+                                invoke("set_idle", JSONObject().put("mode", mode))
+                            }
                         }
                     )
                 }
-                Text(
-                    text = state.optString("idle_label"),
-                    color = Color.Gray,
-                    fontSize = 10.5f.sp,
-                    modifier = Modifier.weight(1f)
+                LegacyToolbarButton(
+                    label = "环境配置",
+                    enabled = localControlsEnabled && busyEvent == null,
+                    onClick = { showEnvironmentConfigPage = true }
                 )
             } else {
                 OutlinedButton(
@@ -325,6 +363,7 @@ internal fun TerminalWorkbenchBlock(
                 ) {
                     Text("Ctrl+C")
                 }
+                Box(modifier = Modifier.weight(1f))
                 Button(
                     enabled = localControlsEnabled && busyEvent == null,
                     colors = ButtonDefaults.buttonColors(
@@ -332,30 +371,36 @@ internal fun TerminalWorkbenchBlock(
                     ),
                     onClick = { invoke(if (ubuntuRunning) "stop" else "start") }
                 ) {
-                    Text(if (ubuntuRunning) "停止 Ubuntu" else "启动 Ubuntu")
+                    Text(if (ubuntuRunning) "停止 Ubuntu" else "启动系统")
                 }
                 Box {
-                    OutlinedButton(
+                    TerminalIdleButton(
                         enabled = localControlsEnabled && busyEvent == null,
-                        onClick = { configExpanded = true }
-                    ) {
-                        Text("环境配置")
-                    }
+                        idleShutdownEnabled = idleShutdownEnabled,
+                        displayText = idleDisplay,
+                        legacy06478 = false,
+                        onClick = { idleExpanded = true }
+                    )
                     TerminalIdleDropdown(
-                        expanded = configExpanded,
-                        onDismiss = { configExpanded = false },
+                        expanded = idleExpanded,
+                        onDismiss = { idleExpanded = false },
                         onSelect = { mode ->
-                            configExpanded = false
-                            invoke("set_idle", JSONObject().put("mode", mode))
+                            idleExpanded = false
+                            if (mode == "CUSTOM") {
+                                customIdleMinutes = (idleTimeoutMinutes ?: 15).toString()
+                                showCustomIdleDialog = true
+                            } else {
+                                invoke("set_idle", JSONObject().put("mode", mode))
+                            }
                         }
                     )
                 }
-                Text(
-                    text = state.optString("idle_label"),
-                    color = Color.Gray,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.weight(1f)
-                )
+                OutlinedButton(
+                    enabled = localControlsEnabled && busyEvent == null,
+                    onClick = { showEnvironmentConfigPage = true }
+                ) {
+                    Text("环境配置")
+                }
             }
         }
 
@@ -458,6 +503,39 @@ internal fun TerminalWorkbenchBlock(
             }
         }
     }
+
+    if (showCustomIdleDialog) {
+        val customMinutesValue = customIdleMinutes.toIntOrNull()?.takeIf { it in 1..1440 }
+        AlertDialog(
+            onDismissRequest = { showCustomIdleDialog = false },
+            title = { Text("自定义空闲关机") },
+            text = {
+                OutlinedTextField(
+                    value = customIdleMinutes,
+                    onValueChange = { value -> customIdleMinutes = value.filter(Char::isDigit).take(4) },
+                    label = { Text("空闲分钟数（1–1440）") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = customMinutesValue != null,
+                    onClick = {
+                        val minutes = customMinutesValue ?: return@TextButton
+                        showCustomIdleDialog = false
+                        invoke(
+                            "set_idle",
+                            JSONObject().put("mode", "CUSTOM").put("custom_minutes", minutes)
+                        )
+                    }
+                ) { Text("应用") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCustomIdleDialog = false }) { Text("取消") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -482,7 +560,6 @@ private fun TerminalTabChip(
         ) {
             Row(
                 modifier = Modifier
-                    .fillMaxSize()
                     .padding(start = 12.dp, end = if (closable) 4.dp else 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -497,7 +574,7 @@ private fun TerminalTabChip(
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
+                    modifier = Modifier.widthIn(max = if (closable) 156.dp else 176.dp)
                 )
                 if (closable) {
                     Box(
@@ -513,7 +590,9 @@ private fun TerminalTabChip(
         Surface(
             color = if (selected) Color(0xFF535550) else TerminalTab,
             shape = MaterialTheme.shapes.medium,
-            modifier = Modifier.clickable(onClick = onSelect)
+            modifier = Modifier
+                .widthIn(min = 72.dp, max = 200.dp)
+                .clickable(onClick = onSelect)
         ) {
             Row(
                 modifier = Modifier.padding(start = 14.dp, end = if (closable) 4.dp else 14.dp, top = 8.dp, bottom = 8.dp),
@@ -523,7 +602,14 @@ private fun TerminalTabChip(
                 if (shared) {
                     Text("●", color = if (online) TerminalAccent else Color.Gray, fontSize = 10.sp)
                 }
-                Text(title, color = Color.White, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
+                Text(
+                    title,
+                    color = Color.White,
+                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = if (closable) 156.dp else 176.dp)
+                )
                 if (closable) {
                     Text(
                         "×",
@@ -589,6 +675,92 @@ private fun LegacyToolbarButton(
 }
 
 @Composable
+private fun TerminalEnvironmentConfigPage(
+    legacy06478: Boolean,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF1A1A1A))
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(TerminalChrome)
+                .padding(horizontal = if (legacy06478) 8.dp else 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Surface(
+                color = Color.Transparent,
+                modifier = Modifier
+                    .size(if (legacy06478) 32.dp else 40.dp)
+                    .clickable(onClick = onBack)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Default.ArrowBack,
+                        contentDescription = "返回终端",
+                        tint = Color.White
+                    )
+                }
+            }
+            Text(
+                text = "环境配置",
+                color = Color.White,
+                fontSize = if (legacy06478) 20.sp else 22.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        // Reserved for future system-environment child plugins.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF1A1A1A))
+        )
+    }
+}
+
+@Composable
+private fun TerminalIdleButton(
+    enabled: Boolean,
+    idleShutdownEnabled: Boolean,
+    displayText: String,
+    legacy06478: Boolean,
+    onClick: () -> Unit
+) {
+    val indicatorColor = if (idleShutdownEnabled) Color(0xFF00C853) else Color(0xFFE05A5A)
+    Surface(
+        color = if (enabled) Color(0xFF3A3A3A) else Color(0xFF303030),
+        shape = RoundedCornerShape(if (legacy06478) 6.dp else 8.dp),
+        modifier = Modifier.clickable(enabled = enabled, onClick = onClick)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if (legacy06478) 3.dp else 5.dp),
+            modifier = Modifier.padding(
+                horizontal = if (legacy06478) 6.dp else 9.dp,
+                vertical = if (legacy06478) 3.2f.dp else 6.dp
+            )
+        ) {
+            Icon(
+                imageVector = Icons.Default.Schedule,
+                contentDescription = "空闲自动关机",
+                tint = if (enabled) indicatorColor else Color.Gray,
+                modifier = Modifier.size(if (legacy06478) 15.dp else 18.dp)
+            )
+            Text(
+                text = displayText,
+                color = if (enabled) Color.White else Color.Gray,
+                fontSize = if (legacy06478) 11.2f.sp else 13.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+    }
+}
+
+@Composable
 private fun TerminalIdleDropdown(
     expanded: Boolean,
     onDismiss: () -> Unit,
@@ -600,10 +772,11 @@ private fun TerminalIdleDropdown(
             "MINUTES_10" to "10 分钟",
             "MINUTES_15" to "15 分钟",
             "MINUTES_30" to "30 分钟",
-            "MINUTES_60" to "60 分钟"
+            "MINUTES_60" to "60 分钟",
+            "CUSTOM" to "自定义"
         ).forEach { (mode, label) ->
             DropdownMenuItem(
-                text = { Text("空闲策略：$label") },
+                text = { Text(label) },
                 onClick = { onSelect(mode) }
             )
         }
