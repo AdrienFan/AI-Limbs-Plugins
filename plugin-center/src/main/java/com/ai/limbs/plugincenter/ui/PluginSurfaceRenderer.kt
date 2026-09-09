@@ -869,13 +869,21 @@ private class PluginCenterSharedUiHost(
     private val supported = setOf(
         InProcessSharedUiComponentIds.CHILD_EXTENSION_INSTALLER,
         InProcessSharedUiComponentIds.CHILD_EXTENSION_SELECTOR,
-        InProcessSharedUiComponentIds.CHILD_EXTENSION_LIST
+        InProcessSharedUiComponentIds.CHILD_EXTENSION_LIST,
+        InProcessSharedUiComponentIds.PAGE_ACCESSORY_SUPPRESSOR
     )
 
     override fun supports(componentId: String): Boolean = componentId in supported
 
     override fun createComponent(componentId: String, parametersJson: String): View {
         require(supports(componentId)) { "Plugin Center 未声明共享控件：$componentId" }
+        if (componentId == InProcessSharedUiComponentIds.PAGE_ACCESSORY_SUPPRESSOR) {
+            return PageAccessorySuppressionLeaseView(
+                context = context,
+                ownerPluginId = surface.ownerPluginId,
+                screenId = surface.screenId
+            )
+        }
         val block = runCatching { JSONObject(parametersJson) }.getOrElse { JSONObject() }
         return ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
