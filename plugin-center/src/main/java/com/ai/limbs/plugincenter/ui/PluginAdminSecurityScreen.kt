@@ -598,19 +598,19 @@ internal fun PluginAdminSecurityScreen(
                             scope.launch {
                                 busy = true
                                 runCatching { selfMaintenance.onlineUpdate() }
-                                    .onSuccess { returnToToolbox("Plugin Center 在线升级已开始，请重新打开") }
+                                    .onSuccess { returnToToolbox("Plugin Center 在线更新已开始，请重新打开") }
                                     .onFailure(onError)
                                 busy = false
                             }
                         },
                         enabled = !busy && onlineUpdateStatus.available && onlineUpdateStatus.enabled,
                         modifier = Modifier.weight(1f)
-                    ) { Text("在线升级") }
+                    ) { Text("在线更新") }
                     OutlinedButton(
                         onClick = { upgradeLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) },
                         enabled = !busy,
                         modifier = Modifier.weight(1f)
-                    ) { Text("升级") }
+                    ) { Text("本地更新") }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),

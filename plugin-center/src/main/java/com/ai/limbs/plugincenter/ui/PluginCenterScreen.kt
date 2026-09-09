@@ -1182,8 +1182,8 @@ private fun PluginCard(
                         Text("切换到 v$latestInstalledVersion")
                     }
                 }
-                TextButton(onClick = onUpdate) { Text("升级") }
-                TextButton(onClick = onOnlineUpgrade, enabled = parentOnlineUpgradeAvailable(snapshot)) { Text("在线升级") }
+                TextButton(onClick = onUpdate) { Text("本地更新") }
+                TextButton(onClick = onOnlineUpgrade, enabled = parentOnlineUpgradeAvailable(snapshot)) { Text("在线更新") }
                 if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
                     DangerTextButton(onClick = onUninstall) { Text("卸载") }
                 }
@@ -1360,8 +1360,8 @@ private fun ChildExtensionCard(
                     TextButton(onClick = onEnable) { Text("启用") }
                 }
                 TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
-                TextButton(onClick = onUpgrade) { Text("升级") }
-                TextButton(onClick = onOnlineUpgrade, enabled = onlineUpgradeEnabled) { Text("在线升级") }
+                TextButton(onClick = onUpgrade) { Text("本地更新") }
+                TextButton(onClick = onOnlineUpgrade, enabled = onlineUpgradeEnabled) { Text("在线更新") }
                 DangerTextButton(onClick = onUninstall) { Text("卸载") }
             }
         }
@@ -1454,8 +1454,8 @@ private fun PluginDetail(
             OutlinedButton(
                 onClick = onOnlineUpgrade,
                 enabled = !busy && parentOnlineUpgradeAvailable(snapshot)
-            ) { Text("在线升级") }
-            OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("升级") }
+            ) { Text("在线更新") }
+            OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("本地更新") }
             if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
                 DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
             }

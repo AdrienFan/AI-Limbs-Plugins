@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -152,7 +153,11 @@ internal fun PagePluginDrawer(
     var providerPluginIds by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
     var feedback by remember(pageContext.pageId) { mutableStateOf<String?>(null) }
     var busyIds by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
+    var mutationFallbacks by remember(pageContext.pageId) {
+        mutableStateOf<Map<String, PagePluginParticipant>>(emptyMap())
+    }
     var updateTarget by remember(pageContext.pageId) { mutableStateOf<PagePluginParticipant?>(null) }
+    var updateChoiceTarget by remember(pageContext.pageId) { mutableStateOf<PagePluginParticipant?>(null) }
     var pendingDisable by remember(pageContext.pageId) { mutableStateOf<PagePluginParticipant?>(null) }
     var showAdminSetup by remember(pageContext.pageId) { mutableStateOf(false) }
     var showAdminPassword by remember(pageContext.pageId) { mutableStateOf(false) }
@@ -217,7 +222,7 @@ internal fun PagePluginDrawer(
             retainedParticipantKeys.forEach { key ->
                 when {
                     key.startsWith(PLUGIN_MEMBER_PREFIX) -> {
-                        if (!pluginSnapshotsLoaded) {
+                        if (!pluginSnapshotsLoaded || key in mutationFallbacks) {
                             add(key)
                         } else {
                             pluginsById[key.removePrefix(PLUGIN_MEMBER_PREFIX)]
@@ -226,7 +231,7 @@ internal fun PagePluginDrawer(
                         }
                     }
                     key.startsWith(CHILD_MEMBER_PREFIX) -> {
-                        if (!childSnapshotsLoaded) {
+                        if (!childSnapshotsLoaded || key in mutationFallbacks) {
                             add(key)
                         } else {
                             childrenById[key.removePrefix(CHILD_MEMBER_PREFIX)]
@@ -242,7 +247,7 @@ internal fun PagePluginDrawer(
             membershipPrefs.edit().putStringSet(membershipPrefsKey, nextKeys).apply()
         }
     }
-    val participants = resolvePagePluginParticipants(
+    val resolvedParticipants = resolvePagePluginParticipants(
         pluginSnapshots = pluginSnapshots,
         childSnapshots = childSnapshots,
         renderedPluginIds = pageContext.embeddedPluginIds,
@@ -251,6 +256,19 @@ internal fun PagePluginDrawer(
         ownerPluginId = ownerPluginId,
         retainedParticipantKeys = retainedParticipantKeys
     )
+    val resolvedKeys = resolvedParticipants.mapTo(linkedSetOf(), ::participantMembershipKey)
+    val participants = (
+        resolvedParticipants + mutationFallbacks
+            .filterKeys { it !in resolvedKeys }
+            .values
+    ).distinctBy(::participantMembershipKey)
+
+    LaunchedEffect(resolvedKeys, busyIds) {
+        if (busyIds.isEmpty() && mutationFallbacks.isNotEmpty()) {
+            val nextFallbacks = mutationFallbacks.filterKeys { it !in resolvedKeys }
+            if (nextFallbacks != mutationFallbacks) mutationFallbacks = nextFallbacks
+        }
+    }
 
     LaunchedEffect(participants.isEmpty()) {
         if (participants.isEmpty()) expanded = false
@@ -259,9 +277,28 @@ internal fun PagePluginDrawer(
 
     fun runMutation(target: PagePluginParticipant, operation: suspend () -> Unit) {
         scope.launch {
+            val membershipKey = participantMembershipKey(target)
+            mutationFallbacks = mutationFallbacks + (membershipKey to target)
             busyIds = busyIds + target.stableId
-            runCatching { withContext(Dispatchers.IO) { operation() } }
+            val result = runCatching { withContext(Dispatchers.IO) { operation() } }
                 .onFailure { feedback = it.message ?: it::class.java.simpleName }
+            if (result.isSuccess) {
+                when (target) {
+                    is PagePluginParticipant.Plugin -> {
+                        runCatching { withContext(Dispatchers.IO) { controlPlane.snapshots() } }
+                            .onSuccess { latest ->
+                                pluginSnapshots = latest
+                                pluginSnapshotsLoaded = true
+                            }
+                    }
+                    is PagePluginParticipant.Child -> {
+                        hub?.snapshots()?.value?.let { latest ->
+                            childSnapshots = latest
+                            childSnapshotsLoaded = true
+                        }
+                    }
+                }
+            }
             busyIds = busyIds - target.stableId
         }
     }
@@ -366,10 +403,7 @@ internal fun PagePluginDrawer(
                 busyIds = busyIds,
                 feedback = feedback,
                 onToggle = { target -> if (target.enabled) requestDisable(target) else performEnable(target) },
-                onUpdate = { target ->
-                    updateTarget = target
-                    updateLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                },
+                onUpdate = { target -> updateChoiceTarget = target },
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)
             )
         }
@@ -389,6 +423,59 @@ internal fun PagePluginDrawer(
                 )
             }
         }
+    }
+
+    updateChoiceTarget?.let { target ->
+        val onlineUpdateEnabled = when (target) {
+            is PagePluginParticipant.Plugin -> controlPlane.canOnlineUpgrade(target.snapshot)
+            is PagePluginParticipant.Child -> {
+                val parent = pluginSnapshots.firstOrNull {
+                    it.plugin.pluginId == target.snapshot.target.parentPluginId
+                }
+                controlPlane.canOnlineUpgradeChild(target.snapshot.toSummary(), parent)
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { updateChoiceTarget = null },
+            title = { Text("更新 ${target.displayName}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(
+                        onClick = {
+                            updateChoiceTarget = null
+                            updateTarget = target
+                            updateLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                        },
+                        enabled = target.stableId !in busyIds
+                    ) { Text("本地更新") }
+                    TextButton(
+                        onClick = {
+                            updateChoiceTarget = null
+                            when (target) {
+                                is PagePluginParticipant.Plugin ->
+                                    runMutation(target) { controlPlane.onlineUpgrade(target.snapshot) }
+                                is PagePluginParticipant.Child -> {
+                                    val parent = pluginSnapshots.firstOrNull {
+                                        it.plugin.pluginId == target.snapshot.target.parentPluginId
+                                    }
+                                    if (parent == null) {
+                                        feedback = "找不到子插件所属插件：${target.snapshot.target.parentPluginId}"
+                                    } else {
+                                        runMutation(target) {
+                                            controlPlane.onlineUpgradeChild(target.snapshot.toSummary(), parent)
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        enabled = onlineUpdateEnabled && target.stableId !in busyIds
+                    ) { Text("在线更新") }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { updateChoiceTarget = null }) { Text("取消") }
+            }
+        )
     }
 
     if (showAdminSetup) {
