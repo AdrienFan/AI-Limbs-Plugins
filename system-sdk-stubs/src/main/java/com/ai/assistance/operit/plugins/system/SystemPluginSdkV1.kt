@@ -116,6 +116,28 @@ interface SystemPageAccessoryHostV1 {
     fun registerPageAccessoryRenderer(renderer: SystemPageAccessoryRendererV1): AutoCloseable
 }
 
+object SystemPageSlotIdsV1 {
+    const val TOP_BAR_START = "top_bar_start"
+    const val TOP_BAR_END = "top_bar_end"
+    const val OVERLAY = "overlay"
+}
+
+data class SystemPageSlotContextV1(
+    val page: SystemPageContextV1,
+    val slotId: String,
+    val contentColorArgb: Int? = null,
+    val enabled: Boolean = true
+)
+
+interface SystemPageSlotRendererV1 {
+    @Composable
+    fun Render(context: SystemPageSlotContextV1)
+}
+
+interface SystemPageSlotHostV1 {
+    fun registerPageSlotRenderer(renderer: SystemPageSlotRendererV1): AutoCloseable
+}
+
 interface SystemUiHostV2 : SystemUiHostV1 {
     fun registerPluginSurfaceRenderer(renderer: SystemPluginUiRendererV2): AutoCloseable
 }

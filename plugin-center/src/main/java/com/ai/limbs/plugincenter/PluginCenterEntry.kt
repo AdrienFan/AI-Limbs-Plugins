@@ -1,5 +1,6 @@
 package com.ai.limbs.plugincenter
 
+import com.ai.assistance.operit.plugins.system.SystemPageSlotHostV1
 import com.ai.assistance.operit.plugins.system.SystemPageAccessoryHostV1
 import com.ai.assistance.operit.plugins.system.SystemPluginEntryV1
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV1
@@ -9,6 +10,8 @@ import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
 import com.ai.assistance.operit.plugins.system.SystemUiPageV1
 import com.ai.limbs.plugincenter.runtime.PluginCenterDelegatedGateway
 import com.ai.limbs.plugincenter.runtime.PluginCenterRuntime
+import com.ai.limbs.plugincenter.runtime.PluginCenterUiAccessoryService
+import com.ai.limbs.plugincenter.ui.PluginCenterPageSlotRenderer
 import com.ai.limbs.plugincenter.ui.PluginCenterPageAccessoryRenderer
 import com.ai.limbs.plugincenter.ui.PluginCenterPluginUiRenderer
 import com.ai.limbs.plugincenter.ui.PluginCenterScreen
@@ -35,9 +38,30 @@ class PluginCenterEntry : SystemPluginEntryV1 {
             PluginCenterRuntime.detach()
             throw error
         }
+        val pageSlotHandle = try {
+            (hostV2.ui as? SystemPageSlotHostV1)
+                ?.registerPageSlotRenderer(PluginCenterPageSlotRenderer(hostV2))
+                ?: AutoCloseable { }
+        } catch (error: Throwable) {
+            runCatching { accessoryHandle.close() }
+            runCatching { rendererHandle.close() }
+            PluginCenterRuntime.detach()
+            throw error
+        }
         val serviceHandle = try {
             PluginCenterDelegatedGateway(hostV2).publish()
         } catch (error: Throwable) {
+            runCatching { pageSlotHandle.close() }
+            runCatching { accessoryHandle.close() }
+            runCatching { rendererHandle.close() }
+            PluginCenterRuntime.detach()
+            throw error
+        }
+        val uiAccessoryServiceHandle = try {
+            PluginCenterUiAccessoryService(hostV2).publish()
+        } catch (error: Throwable) {
+            runCatching { serviceHandle.close() }
+            runCatching { pageSlotHandle.close() }
             runCatching { accessoryHandle.close() }
             runCatching { rendererHandle.close() }
             PluginCenterRuntime.detach()
@@ -54,7 +78,9 @@ class PluginCenterEntry : SystemPluginEntryV1 {
                 )
             )
         } catch (error: Throwable) {
+            runCatching { uiAccessoryServiceHandle.close() }
             runCatching { serviceHandle.close() }
+            runCatching { pageSlotHandle.close() }
             runCatching { accessoryHandle.close() }
             runCatching { rendererHandle.close() }
             PluginCenterRuntime.detach()
@@ -62,7 +88,9 @@ class PluginCenterEntry : SystemPluginEntryV1 {
         }
         return AutoCloseable {
             runCatching { uiHandle.close() }
+            runCatching { uiAccessoryServiceHandle.close() }
             runCatching { serviceHandle.close() }
+            runCatching { pageSlotHandle.close() }
             runCatching { accessoryHandle.close() }
             runCatching { rendererHandle.close() }
             PluginCenterRuntime.detach()
