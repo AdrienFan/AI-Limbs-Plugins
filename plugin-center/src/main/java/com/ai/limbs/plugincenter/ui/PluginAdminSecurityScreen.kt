@@ -68,6 +68,7 @@ import com.ai.limbs.plugincenter.model.HostSurfaceKind
 import com.ai.limbs.plugincenter.model.HostSurfaceSnapshot
 import com.ai.limbs.plugincenter.model.HostPrimitiveSnapshot
 import com.ai.limbs.plugincenter.model.InactivityThresholdMode
+import com.ai.limbs.plugincenter.model.InteractionCyclePolicySnapshot
 import com.ai.limbs.plugincenter.model.PluginBackupPolicyStore
 import com.ai.limbs.plugincenter.model.PluginBackupSnapshot
 import com.ai.limbs.plugincenter.runtime.PluginControlPlaneFacade
@@ -88,6 +89,25 @@ private data class AdminBackupInventory(
 )
 
 private const val PERIPHERAL_HOST_PRIMITIVE_PREFIX = "host.peripheral."
+private const val DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS = 30L * 60L * 1000L
+private const val MIN_INTERACTION_CYCLE_TIMEOUT_MS = 60L * 1000L
+private const val MAX_INTERACTION_CYCLE_TIMEOUT_MS = 365L * 24L * 60L * 60L * 1000L
+
+private enum class InteractionCycleUnit(val label: String, val multiplierMs: Long) {
+    MINUTES("分钟", 60L * 1000L),
+    HOURS("小时", 60L * 60L * 1000L),
+    DAYS("天", 24L * 60L * 60L * 1000L)
+}
+
+private data class InteractionCycleOption(val timeoutMs: Long, val label: String)
+private val INTERACTION_CYCLE_OPTIONS = listOf(
+    InteractionCycleOption(DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS, "30 分钟（默认）"),
+    InteractionCycleOption(60L * 60L * 1000L, "1 小时"),
+    InteractionCycleOption(6L * 60L * 60L * 1000L, "6 小时"),
+    InteractionCycleOption(12L * 60L * 60L * 1000L, "12 小时"),
+    InteractionCycleOption(24L * 60L * 60L * 1000L, "1 天"),
+    InteractionCycleOption(2L * 24L * 60L * 60L * 1000L, "2 天")
+)
 
 private fun HostPrimitiveSnapshot.matchesQuery(normalizedQuery: String): Boolean {
     if (normalizedQuery.isBlank()) return true
@@ -298,6 +318,10 @@ internal fun PluginAdminSecurityScreen(
     var authFrequency by remember { mutableStateOf(adminSecurity.authFrequency()) }
     var authFrequencyExpanded by remember { mutableStateOf(false) }
     var pendingAuthFrequency by remember { mutableStateOf<AdminAuthFrequency?>(null) }
+    var interactionCycleTimeoutMs by remember { mutableStateOf(DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS) }
+    var interactionCycleExpanded by remember { mutableStateOf(false) }
+    var showCustomInteractionCycle by remember { mutableStateOf(false) }
+    var pendingInteractionCycleTimeoutMs by remember { mutableStateOf<Long?>(null) }
     var surfaceQuery by remember { mutableStateOf("") }
     var newRecoveryKey by remember { mutableStateOf<String?>(null) }
     var maintenanceStatus by remember {
@@ -429,6 +453,9 @@ internal fun PluginAdminSecurityScreen(
         inactivitySeconds = inactivity.testSeconds.toString()
         backupAutoEnabled = controlPlane.backupPolicySnapshot().enabled
         authFrequency = adminSecurity.authFrequency()
+        interactionCycleTimeoutMs = runCatching {
+            withContext(Dispatchers.IO) { controlPlane.interactionCyclePolicy().timeoutMs }
+        }.getOrDefault(DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS)
     }
 
     val peripheralPrimitives = remember(primitives) {
@@ -569,10 +596,46 @@ internal fun PluginAdminSecurityScreen(
                                 }
                             }
                         }
+                        Text("AI Limbs 交互周期", fontWeight = FontWeight.Medium)
+                        Box {
+                            OutlinedButton(
+                                onClick = { interactionCycleExpanded = true },
+                                enabled = !busy
+                            ) {
+                                Text(interactionCycleLabel(interactionCycleTimeoutMs))
+                            }
+                            DropdownMenu(
+                                expanded = interactionCycleExpanded,
+                                onDismissRequest = { interactionCycleExpanded = false }
+                            ) {
+                                INTERACTION_CYCLE_OPTIONS.forEach { option ->
+                                    DropdownMenuItem(
+                                        text = { Text(option.label) },
+                                        onClick = {
+                                            interactionCycleExpanded = false
+                                            if (option.timeoutMs != interactionCycleTimeoutMs) {
+                                                pendingInteractionCycleTimeoutMs = option.timeoutMs
+                                            }
+                                        }
+                                    )
+                                }
+                                DropdownMenuItem(
+                                    text = { Text("自定义…") },
+                                    onClick = {
+                                        interactionCycleExpanded = false
+                                        showCustomInteractionCycle = true
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
                 Text(
                     "验证频率仅影响普通插件卸载。系统插件禁用/卸载始终每次验证；管理员安全设置也不会被豁免。",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                Text(
+                    "AI Limbs 交互周期由基座计算。达到周期只标记软过期，不会中断正在执行的工作；下一次进入 AI Limbs 时才重新建立系统接入提示与收据流程。配置缺失或异常时基座使用 30 分钟默认值。",
                     style = MaterialTheme.typography.bodySmall
                 )
             }
@@ -1145,6 +1208,28 @@ internal fun PluginAdminSecurityScreen(
             }
         )
     }
+    if (showCustomInteractionCycle) {
+        CustomInteractionCycleDialog(
+            onDismiss = { showCustomInteractionCycle = false },
+            onSelected = { timeoutMs ->
+                showCustomInteractionCycle = false
+                if (timeoutMs != interactionCycleTimeoutMs) {
+                    pendingInteractionCycleTimeoutMs = timeoutMs
+                }
+            }
+        )
+    }
+    pendingInteractionCycleTimeoutMs?.let { targetTimeoutMs ->
+        ChangeInteractionCycleDialog(
+            controlPlane = controlPlane,
+            targetTimeoutMs = targetTimeoutMs,
+            onDismiss = { pendingInteractionCycleTimeoutMs = null },
+            onChanged = { snapshot ->
+                interactionCycleTimeoutMs = snapshot.timeoutMs
+                pendingInteractionCycleTimeoutMs = null
+            }
+        )
+    }
     newRecoveryKey?.let { key -> RecoveryKeyDialog(key) { newRecoveryKey = null } }
 }
 
@@ -1443,6 +1528,16 @@ private fun adminAuthFrequencyLabel(frequency: AdminAuthFrequency): String = whe
     AdminAuthFrequency.NEVER -> "普通插件不再询问"
 }
 
+private fun interactionCycleLabel(timeoutMs: Long): String =
+    INTERACTION_CYCLE_OPTIONS.firstOrNull { it.timeoutMs == timeoutMs }?.label
+        ?: when {
+            timeoutMs % (24L * 60L * 60L * 1000L) == 0L ->
+                "${timeoutMs / (24L * 60L * 60L * 1000L)} 天"
+            timeoutMs % (60L * 60L * 1000L) == 0L ->
+                "${timeoutMs / (60L * 60L * 1000L)} 小时"
+            else -> "${timeoutMs / (60L * 1000L)} 分钟"
+        }
+
 @Composable
 private fun ChangePasswordDialog(
     adminSecurity: AdminSecurityFacade,
@@ -1563,6 +1658,51 @@ private fun ChangeAuthFrequencyDialog(
 }
 
 @Composable
+private fun ChangeInteractionCycleDialog(
+    controlPlane: PluginControlPlaneFacade,
+    targetTimeoutMs: Long,
+    onDismiss: () -> Unit,
+    onChanged: (InteractionCyclePolicySnapshot) -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("修改 AI Limbs 交互周期") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("将 AI Limbs 交互周期改为：${interactionCycleLabel(targetTimeoutMs)}")
+                Text(
+                    "达到周期只标记软过期，不会中断当前工作；下一次进入 AI Limbs 时才重新建立接入流程。",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                PasswordField("当前管理员密码", password) { password = it }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy, onClick = {
+                scope.launch {
+                    busy = true
+                    val result = runCatching {
+                        withContext(Dispatchers.IO) {
+                            controlPlane.setInteractionCycleTimeout(password, targetTimeoutMs)
+                        }
+                    }
+                    busy = false
+                    result.onSuccess { snapshot ->
+                        if (snapshot != null) onChanged(snapshot) else error = "管理员密码不正确"
+                    }.onFailure { error = it.message ?: "修改失败" }
+                }
+            }) { Text(if (busy) "验证中…" else "确认修改") }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
 private fun PasswordField(label: String, value: String, onValueChange: (String) -> Unit) {
     OutlinedTextField(
         value = value,
@@ -1571,5 +1711,80 @@ private fun PasswordField(label: String, value: String, onValueChange: (String) 
         modifier = Modifier.fillMaxWidth(),
         visualTransformation = PasswordVisualTransformation(),
         singleLine = true
+    )
+}
+
+
+@Composable
+private fun CustomInteractionCycleDialog(
+    onDismiss: () -> Unit,
+    onSelected: (Long) -> Unit
+) {
+    var valueText by remember { mutableStateOf("") }
+    var unit by remember { mutableStateOf(InteractionCycleUnit.MINUTES) }
+    var unitExpanded by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("自定义 AI Limbs 交互周期") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "可设置 1 分钟至 365 天。周期到期仅标记软过期，不会中断当前工作。",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedTextField(
+                    value = valueText,
+                    onValueChange = { input -> valueText = input.filter { it.isDigit() }; error = null },
+                    label = { Text("周期数值") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
+                )
+                Box {
+                    OutlinedButton(onClick = { unitExpanded = true }) {
+                        Text(unit.label)
+                    }
+                    DropdownMenu(
+                        expanded = unitExpanded,
+                        onDismissRequest = { unitExpanded = false }
+                    ) {
+                        InteractionCycleUnit.entries.forEach { candidate ->
+                            DropdownMenuItem(
+                                text = { Text(candidate.label) },
+                                onClick = {
+                                    unit = candidate
+                                    unitExpanded = false
+                                    error = null
+                                }
+                            )
+                        }
+                    }
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val raw = valueText.toLongOrNull()
+                if (raw == null || raw <= 0L) {
+                    error = "请输入大于 0 的整数"
+                    return@TextButton
+                }
+                if (raw > MAX_INTERACTION_CYCLE_TIMEOUT_MS / unit.multiplierMs) {
+                    error = "自定义周期不能超过 365 天"
+                    return@TextButton
+                }
+                val timeoutMs = raw * unit.multiplierMs
+                if (timeoutMs !in MIN_INTERACTION_CYCLE_TIMEOUT_MS..MAX_INTERACTION_CYCLE_TIMEOUT_MS) {
+                    error = "自定义周期必须在 1 分钟至 365 天之间"
+                    return@TextButton
+                }
+                onSelected(timeoutMs)
+            }) { Text("下一步") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        }
     )
 }

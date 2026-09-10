@@ -20,6 +20,7 @@ internal data class PluginInstallOptions(
 private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
 private const val CHILD_ONLINE_UPDATE_ROLE = "online_update"
 private const val EXTENSION_HUB_BACKUP_EXPORT_CAPABILITY = "plugin.extension_hub.export_backups"
+private const val INTERACTION_CYCLE_PRIMITIVE_ID = "host.interaction.cycle@1"
 
 internal class PluginControlPlaneFacade(
     private val host: SystemPluginHostV2
@@ -54,6 +55,19 @@ internal class PluginControlPlaneFacade(
 
     suspend fun invokeHostPrimitive(id: String, operation: String, parameters: JSONObject = JSONObject()): JSONObject =
         host.hostGateway.invokeHostPrimitive(id, operation, parameters)
+
+    suspend fun interactionCyclePolicy(): InteractionCyclePolicySnapshot =
+        parseInteractionCyclePolicy(invokeHostPrimitive(INTERACTION_CYCLE_PRIMITIVE_ID, "status"))
+
+    suspend fun setInteractionCycleTimeout(password: String, timeoutMs: Long): InteractionCyclePolicySnapshot? {
+        val result = invokeHostPrimitive(
+            INTERACTION_CYCLE_PRIMITIVE_ID,
+            "set_timeout",
+            JSONObject().put("admin_password", password).put("timeout_ms", timeoutMs)
+        )
+        if (!result.optBoolean("authorized", false)) return null
+        return parseInteractionCyclePolicy(result)
+    }
 
     suspend fun setDeveloperMode(enabled: Boolean) =
         host.pluginPlatform.setDeveloperMode(enabled)
@@ -531,6 +545,13 @@ internal class SelfMaintenanceFacade(
         service.call("rollback")
     }
 }
+
+private fun parseInteractionCyclePolicy(json: JSONObject) = InteractionCyclePolicySnapshot(
+    timeoutMs = json.optLong("timeout_ms", 30L * 60L * 1000L),
+    defaultTimeoutMs = json.optLong("default_timeout_ms", 30L * 60L * 1000L),
+    configured = json.optBoolean("configured", false),
+    source = json.optString("source", "default")
+)
 
 private fun parseAdminStatus(json: JSONObject) = AdminSecuritySnapshot(
     configured = json.getBoolean("configured"),
