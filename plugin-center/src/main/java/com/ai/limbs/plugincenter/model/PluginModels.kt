@@ -155,6 +155,12 @@ data class PluginInactivityPolicySnapshot(
     val enabledAtEpochMs: Long
 )
 data class PluginBackupPolicySnapshot(val enabled: Boolean)
+data class InteractionCyclePolicySnapshot(
+    val timeoutMs: Long,
+    val defaultTimeoutMs: Long,
+    val configured: Boolean,
+    val source: String
+)
 data class AdminSecuritySnapshot(
     val configured: Boolean,
     val recoveryConfigured: Boolean,
