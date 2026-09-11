@@ -111,6 +111,14 @@ internal class PluginCenterPageAccessoryRenderer(
 ) : SystemPageAccessoryRendererV1 {
     @Composable
     override fun Render(context: SystemPageContextV1) {
+        val suppressedPages by PageAccessorySuppressionRegistry.suppressedPages.collectAsState()
+        val ownerPluginId = context.ownerPluginId?.trim().orEmpty()
+        val screenId = context.screenId?.trim().orEmpty()
+        if (ownerPluginId.isNotEmpty() && screenId.isNotEmpty() &&
+            PageAccessorySuppressionKey(ownerPluginId, screenId) in suppressedPages
+        ) {
+            return
+        }
         PagePluginDrawer(host = host, pageContext = context)
     }
 }

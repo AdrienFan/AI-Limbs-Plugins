@@ -1,6 +1,8 @@
 package com.ai.limbs.plugincenter.ui
 
+import android.content.Context
 import android.content.Intent
+import android.view.View
 import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -45,7 +47,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -56,6 +61,9 @@ import com.ai.assistance.operit.plugins.system.SystemPluginUiSurfaceV2
 import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
 import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
 import com.ai.limbs.plugin.runtime.ExtensionHubService
+import com.ai.limbs.plugin.runtime.InProcessPageProvider
+import com.ai.limbs.plugin.runtime.InProcessSharedUiComponentIds
+import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import java.io.File
@@ -192,6 +200,8 @@ private class PluginUiComponentRegistry(private val host: SystemPluginHostV2) {
         "child_extension_selector" to { surface, block -> ChildExtensionSelectorBlock(host, surface, block) },
         "child_extension_list" to { surface, block -> ChildExtensionListBlock(host, surface, block) },
         "dynamic_panel" to { surface, block -> DynamicPanelBlock(host, surface, block) },
+        "plugin_page" to { surface, block -> PluginOwnedPageBlock(host, surface, block) },
+        // Legacy migration path; new plugins must own their page instead of adding business UI here.
         "terminal_workbench" to { surface, block -> TerminalWorkbenchBlock(host, surface, block) },
         "component_slot" to { surface, block -> ComponentSlotBlock(surface, block) }
     )
@@ -800,6 +810,87 @@ private fun ChildExtensionListBlock(
         feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
     }
 }
+/**
+ * Generic mount point for a plugin-owned full page. Plugin Center does not know the page's buttons,
+ * labels, layout or business state. It only validates provider ownership and supplies explicitly
+ * shared Plugin Center components through [InProcessSharedUiHost].
+ */
+@Composable
+private fun PluginOwnedPageBlock(
+    host: SystemPluginHostV2,
+    surface: SystemPluginUiSurfaceV2,
+    block: JSONObject
+) {
+    val providerId = block.requiredText("provider_id")
+    val binding = observedProvider(host, providerId)
+    val provider = binding
+        ?.takeIf { it.ownerPluginId == surface.ownerPluginId }
+        ?.payload as? InProcessPageProvider
+    if (provider == null) {
+        Text("插件页面 Provider 不可用", style = MaterialTheme.typography.bodySmall)
+        return
+    }
+
+    val context = LocalContext.current
+    val colorScheme = MaterialTheme.colorScheme
+    val typography = MaterialTheme.typography
+    val shapes = MaterialTheme.shapes
+    val sharedUi = remember(host, surface.ownerPluginId, surface.screenId, context, colorScheme, typography, shapes) {
+        PluginCenterSharedUiHost(host, surface, context, colorScheme, typography, shapes)
+    }
+    androidx.compose.runtime.key(provider) {
+        AndroidView(
+            factory = { provider.createView(it, sharedUi) },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+private class PluginCenterSharedUiHost(
+    private val host: SystemPluginHostV2,
+    private val surface: SystemPluginUiSurfaceV2,
+    private val context: Context,
+    private val colorScheme: androidx.compose.material3.ColorScheme,
+    private val typography: androidx.compose.material3.Typography,
+    private val shapes: androidx.compose.material3.Shapes
+) : InProcessSharedUiHost {
+    private val supported = setOf(
+        InProcessSharedUiComponentIds.CHILD_EXTENSION_INSTALLER,
+        InProcessSharedUiComponentIds.CHILD_EXTENSION_SELECTOR,
+        InProcessSharedUiComponentIds.CHILD_EXTENSION_LIST,
+        InProcessSharedUiComponentIds.PAGE_ACCESSORY_SUPPRESSOR
+    )
+
+    override fun supports(componentId: String): Boolean = componentId in supported
+
+    override fun createComponent(componentId: String, parametersJson: String): View {
+        require(supports(componentId)) { "Plugin Center 未声明共享控件：$componentId" }
+        if (componentId == InProcessSharedUiComponentIds.PAGE_ACCESSORY_SUPPRESSOR) {
+            return PageAccessorySuppressionLeaseView(
+                context = context,
+                ownerPluginId = surface.ownerPluginId,
+                screenId = surface.screenId
+            )
+        }
+        val block = runCatching { JSONObject(parametersJson) }.getOrElse { JSONObject() }
+        return ComposeView(context).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
+            setContent {
+                MaterialTheme(colorScheme = colorScheme, typography = typography, shapes = shapes) {
+                    when (componentId) {
+                        InProcessSharedUiComponentIds.CHILD_EXTENSION_INSTALLER ->
+                            ChildExtensionInstallerBlock(host, surface, block)
+                        InProcessSharedUiComponentIds.CHILD_EXTENSION_SELECTOR ->
+                            ChildExtensionSelectorBlock(host, surface, block)
+                        InProcessSharedUiComponentIds.CHILD_EXTENSION_LIST ->
+                            ChildExtensionListBlock(host, surface, block)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DynamicPanelBlock(
     host: SystemPluginHostV2,
