@@ -43,7 +43,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -112,6 +116,8 @@ internal fun TerminalWorkbenchBlock(
     val consoleHorizontalPadding = if (legacy06478) with(density) { 16f.toDp() } else 14.dp
     val consoleVerticalPadding = if (legacy06478) with(density) { 16f.toDp() } else 12.dp
     val consoleLineHeight = if (legacy06478) TextUnit.Unspecified else 19.sp
+    val legacyLogoFontSize = with(density) { 36f.toSp() }
+    val legacyLogoLineHeight = with(density) { 39f.toSp() }
     val scope = rememberCoroutineScope()
     var command by remember(providerId, activeTabId) { mutableStateOf("") }
     var feedback by remember(providerId) { mutableStateOf<String?>(null) }
@@ -137,6 +143,15 @@ internal fun TerminalWorkbenchBlock(
             } finally {
                 busyEvent = null
             }
+        }
+    }
+
+    val displayConsoleText = remember(consoleContent, consoleEmptyText, legacy06478, density) {
+        val raw = consoleContent.ifBlank { consoleEmptyText }
+        if (legacy06478 && consoleContent.isNotBlank()) {
+            compactLegacyWelcomeLogo(raw, legacyLogoFontSize, legacyLogoLineHeight)
+        } else {
+            AnnotatedString(raw)
         }
     }
 
@@ -225,7 +240,7 @@ internal fun TerminalWorkbenchBlock(
         ) {
             SelectionContainer {
                 Text(
-                    text = consoleContent.ifBlank { consoleEmptyText },
+                    text = displayConsoleText,
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(consoleScroll)
@@ -437,6 +452,35 @@ internal fun TerminalWorkbenchBlock(
                 }
             }
         }
+    }
+}
+
+
+private const val LegacyWelcomeLogoStart = "     _    ___   _     ___ __  __ ___  ___ "
+private const val LegacyWelcomeTagline = "  >> AI Limbs Ubuntu sandbox on Android <<"
+
+private fun compactLegacyWelcomeLogo(
+    text: String,
+    logoFontSize: TextUnit,
+    logoLineHeight: TextUnit
+): AnnotatedString {
+    val start = text.indexOf(LegacyWelcomeLogoStart)
+    if (start < 0) return AnnotatedString(text)
+    val taglineStart = text.indexOf(LegacyWelcomeTagline, start)
+    if (taglineStart <= start) return AnnotatedString(text)
+
+    return buildAnnotatedString {
+        append(text)
+        addStyle(
+            SpanStyle(fontSize = logoFontSize, letterSpacing = (-0.25f).sp),
+            start = start,
+            end = taglineStart
+        )
+        addStyle(
+            ParagraphStyle(lineHeight = logoLineHeight),
+            start = start,
+            end = taglineStart
+        )
     }
 }
 
