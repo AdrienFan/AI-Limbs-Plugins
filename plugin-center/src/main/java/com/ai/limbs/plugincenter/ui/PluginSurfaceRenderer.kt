@@ -242,9 +242,7 @@ private class PluginUiComponentRegistry(private val host: SystemPluginHostV2) {
         val policy = wrapper.optJSONObject("child_slots")?.optJSONObject(slotId) ?: return
         val allowedPoints = policy.optJSONArray("points").toStringList().map { it.lowercase() }.toSet()
         if (allowedPoints.isEmpty()) return
-        val hub = observedProvider(host, InProcessSystemIds.EXTENSION_HUB_PROVIDER)?.payload as? ExtensionHubService
-            ?: return
-        val allContributions by hub.uiContributions().collectAsState()
+        val allContributions by host.childExtensions.uiContributions().collectAsState()
         val screenId = surface.screenId.trim().lowercase()
         allContributions
             .filter { contribution ->
@@ -562,12 +560,7 @@ private fun ChildExtensionSelectorBlock(
     val label = block.requiredText("label")
     val selectCapabilityId = block.requiredText("select_capability_id")
     val selectionProviderId = block.optString("selection_provider_id").trim().ifBlank { null }
-    val hub = observedProvider(host, InProcessSystemIds.EXTENSION_HUB_PROVIDER)?.payload as? ExtensionHubService
-    if (hub == null) {
-        Text("Plugin Extension Hub 未启用")
-        return
-    }
-    val snapshots by hub.snapshotsForPoint(point).collectAsState()
+    val snapshots by host.childExtensions.snapshotsForPoint(point).collectAsState()
     val active = snapshots.filter {
         it.target.parentPluginId == surface.ownerPluginId && it.lifecycle == ChildExtensionLifecycle.ACTIVE
     }
@@ -618,13 +611,8 @@ private fun ChildExtensionListBlock(
     block: JSONObject
 ) {
     val point = block.requiredText("point")
-    val hub = observedProvider(host, InProcessSystemIds.EXTENSION_HUB_PROVIDER)?.payload as? ExtensionHubService
-    if (hub == null) {
-        Text("Plugin Extension Hub 未启用")
-        return
-    }
-    val allSnapshots by hub.snapshotsForPoint(point).collectAsState()
-    val allBackups by hub.backupSnapshots().collectAsState()
+    val allSnapshots by host.childExtensions.snapshotsForPoint(point).collectAsState()
+    val allBackups by host.childExtensions.backupSnapshots().collectAsState()
     val snapshots = remember(allSnapshots, surface.ownerPluginId, point) {
         allSnapshots.filter { it.target.parentPluginId == surface.ownerPluginId && it.target.point == point }
     }
@@ -758,21 +746,21 @@ private fun ChildExtensionListBlock(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = {
                                 scope.launch {
-                                    runCatching { hub.setEnabled(snapshot.extensionId, !snapshot.enabled) }
+                                    runCatching { host.childExtensions.setEnabled(snapshot.extensionId, !snapshot.enabled) }
                                         .onSuccess { feedback = "${it.displayName} → ${it.lifecycle}" }
                                         .onFailure { feedback = "操作失败：${it.message}" }
                                 }
                             }) { Text(if (snapshot.enabled) "禁用" else "启用") }
                             Button(onClick = {
                                 scope.launch {
-                                    runCatching { hub.backup(snapshot.extensionId) }
+                                    runCatching { host.childExtensions.backup(snapshot.extensionId) }
                                         .onSuccess { feedback = "已备份 ${it.displayName} ${it.version}" }
                                         .onFailure { feedback = "备份失败：${it.message}" }
                                 }
                             }) { Text("备份") }
                             Button(onClick = {
                                 scope.launch {
-                                    runCatching { hub.uninstall(snapshot.extensionId) }
+                                    runCatching { host.childExtensions.uninstall(snapshot.extensionId) }
                                         .onSuccess { feedback = if (it) "已卸载 ${snapshot.displayName}" else "子插件不存在" }
                                         .onFailure { feedback = "卸载失败：${it.message}" }
                                 }
@@ -792,14 +780,14 @@ private fun ChildExtensionListBlock(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = {
                                 scope.launch {
-                                    runCatching { hub.restoreBackup(backup.extensionId) }
+                                    runCatching { host.childExtensions.restoreBackup(backup.extensionId) }
                                         .onSuccess { feedback = "已恢复 ${it.displayName} ${it.version}" }
                                         .onFailure { feedback = "恢复失败：${it.message}" }
                                 }
                             }) { Text("恢复") }
                             Button(onClick = {
                                 scope.launch {
-                                    runCatching { hub.deleteBackup(backup.extensionId) }
+                                    runCatching { host.childExtensions.deleteBackup(backup.extensionId) }
                                         .onSuccess { feedback = if (it) "已删除备份" else "备份不存在" }
                                         .onFailure { feedback = "删除备份失败：${it.message}" }
                                 }

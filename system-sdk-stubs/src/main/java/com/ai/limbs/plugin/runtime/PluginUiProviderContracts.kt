@@ -86,19 +86,10 @@ data class ChildExtensionBackupSnapshot(
  */
 interface ExtensionHubService {
     suspend fun install(
-        packageFile: File,
-        expectedParentPluginId: String?,
-        expectedPoint: String?
+        packageFile: java.io.File,
+        expectedParentPluginId: String? = null,
+        expectedPoint: String? = null
     ): ChildExtensionSnapshot
-    suspend fun uninstall(extensionId: String): Boolean
-    suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot
-    suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot
-    suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot
-    suspend fun deleteBackup(extensionId: String): Boolean
-    fun snapshots(): StateFlow<List<ChildExtensionSnapshot>>
-    fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>>
-    fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>>
-    fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>>
 }
 
 object InProcessSystemIds {

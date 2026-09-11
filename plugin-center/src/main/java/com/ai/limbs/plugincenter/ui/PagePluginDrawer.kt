@@ -62,8 +62,6 @@ import com.ai.assistance.operit.plugins.system.SystemPageAccessoryRendererV1
 import com.ai.assistance.operit.plugins.system.SystemPageContextV1
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
-import com.ai.limbs.plugin.runtime.ExtensionHubService
-import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugincenter.model.ChildExtensionSummary
 import com.ai.limbs.plugincenter.model.PluginControlSnapshot
 import com.ai.limbs.plugincenter.runtime.PluginCenterRuntime
@@ -159,20 +157,8 @@ internal fun PagePluginDrawer(
     var showAdminRecovery by remember(pageContext.pageId) { mutableStateOf(false) }
     var recoveryKeyToShow by remember(pageContext.pageId) { mutableStateOf<String?>(null) }
 
-    val initialHubBinding = remember { host.providers.resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER) }
-    val hubBinding by host.providers.observe(InProcessSystemIds.EXTENSION_HUB_PROVIDER)
-        .collectAsState(initial = initialHubBinding)
-    val hub = hubBinding
-        ?.takeIf { it.ownerPluginId == "plugin.system.extension_hub" }
-        ?.payload as? ExtensionHubService
-
-    LaunchedEffect(hub) {
-        if (hub == null) {
-            childSnapshots = emptyList()
-            childSnapshotsLoaded = false
-            return@LaunchedEffect
-        }
-        hub.snapshots().collect { latest ->
+    LaunchedEffect(host, pageContext.pageId) {
+        host.childExtensions.snapshots().collect { latest ->
             childSnapshots = latest
             childSnapshotsLoaded = true
         }

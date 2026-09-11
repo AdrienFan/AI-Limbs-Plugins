@@ -2,6 +2,10 @@ package com.ai.assistance.operit.plugins.system
 
 import androidx.compose.runtime.Composable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
+import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
+import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
 import org.json.JSONObject
 
 data class SystemHostPrimitiveDescriptor(
@@ -176,10 +180,25 @@ interface SystemPluginDelegatedCapabilityInvokerV2 {
     ): JSONObject
 }
 
+interface SystemPluginChildExtensionControlV2 {
+    suspend fun uninstall(extensionId: String): Boolean
+    suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot
+    suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot
+    suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot
+    suspend fun deleteBackup(extensionId: String): Boolean
+    suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long = 10L)
+    suspend fun exportBackups(extensionIds: Collection<String>, treeUri: String): List<String>
+    fun snapshots(): StateFlow<List<ChildExtensionSnapshot>>
+    fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>>
+    fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>>
+    fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>>
+}
+
 interface SystemPluginHostV2 : SystemPluginHostV1 {
     override val ui: SystemUiHostV2
     val services: SystemPluginServicePublisherV2
     val delegatedCapabilities: SystemPluginDelegatedCapabilityInvokerV2
+    val childExtensions: SystemPluginChildExtensionControlV2
     val providers: SystemPluginProviderDirectoryV2
 }
 
