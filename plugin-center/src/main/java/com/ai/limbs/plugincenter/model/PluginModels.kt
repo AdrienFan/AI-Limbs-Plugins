@@ -161,6 +161,12 @@ data class InteractionCyclePolicySnapshot(
     val configured: Boolean,
     val source: String
 )
+data class InteractionCycleResetResult(
+    val policy: InteractionCyclePolicySnapshot,
+    val generation: Long,
+    val appliedImmediately: Boolean,
+    val cycleStartedAtMs: Long
+)
 data class AdminSecuritySnapshot(
     val configured: Boolean,
     val recoveryConfigured: Boolean,

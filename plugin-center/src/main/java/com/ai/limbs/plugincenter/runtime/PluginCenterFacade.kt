@@ -68,6 +68,21 @@ internal class PluginControlPlaneFacade(
         return parseInteractionCyclePolicy(result)
     }
 
+    suspend fun resetInteractionCycle(password: String): InteractionCycleResetResult? {
+        val result = invokeHostPrimitive(
+            INTERACTION_CYCLE_PRIMITIVE_ID,
+            "reset",
+            JSONObject().put("admin_password", password)
+        )
+        if (!result.optBoolean("authorized", false)) return null
+        return InteractionCycleResetResult(
+            policy = parseInteractionCyclePolicy(result),
+            generation = result.optLong("generation", 0L),
+            appliedImmediately = result.optBoolean("reset_applied_immediately", false),
+            cycleStartedAtMs = result.optLong("cycle_started_at_ms", 0L)
+        )
+    }
+
     suspend fun setDeveloperMode(enabled: Boolean) =
         host.pluginPlatform.setDeveloperMode(enabled)
 

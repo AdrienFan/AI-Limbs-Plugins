@@ -69,6 +69,7 @@ import com.ai.limbs.plugincenter.model.HostSurfaceSnapshot
 import com.ai.limbs.plugincenter.model.HostPrimitiveSnapshot
 import com.ai.limbs.plugincenter.model.InactivityThresholdMode
 import com.ai.limbs.plugincenter.model.InteractionCyclePolicySnapshot
+import com.ai.limbs.plugincenter.model.InteractionCycleResetResult
 import com.ai.limbs.plugincenter.model.PluginBackupPolicyStore
 import com.ai.limbs.plugincenter.model.PluginBackupSnapshot
 import com.ai.limbs.plugincenter.runtime.PluginControlPlaneFacade
@@ -102,6 +103,7 @@ private data class InteractionCycleOption(val timeoutMs: Long, val label: String
 private val INTERACTION_CYCLE_OPTIONS = listOf(
     InteractionCycleOption(DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS, "30 分钟（默认）"),
     InteractionCycleOption(60L * 60L * 1000L, "1 小时"),
+    InteractionCycleOption(4L * 60L * 60L * 1000L, "4 小时"),
     InteractionCycleOption(6L * 60L * 60L * 1000L, "6 小时"),
     InteractionCycleOption(12L * 60L * 60L * 1000L, "12 小时"),
     InteractionCycleOption(24L * 60L * 60L * 1000L, "1 天"),
@@ -304,6 +306,7 @@ internal fun PluginAdminSecurityScreen(
     var interactionCycleExpanded by remember { mutableStateOf(false) }
     var showCustomInteractionCycle by remember { mutableStateOf(false) }
     var pendingInteractionCycleTimeoutMs by remember { mutableStateOf<Long?>(null) }
+    var showResetInteractionCycle by remember { mutableStateOf(false) }
     var surfaceQuery by remember { mutableStateOf("") }
     var newRecoveryKey by remember { mutableStateOf<String?>(null) }
     var maintenanceStatus by remember {
@@ -607,16 +610,12 @@ internal fun PluginAdminSecurityScreen(
                                 )
                             }
                         }
+                        OutlinedButton(
+                            onClick = { showResetInteractionCycle = true },
+                            enabled = !busy
+                        ) { Text("刷新 AI 门禁") }
                     }
                 }
-                Text(
-                    "验证频率仅影响普通插件卸载。系统插件禁用/卸载始终每次验证；管理员安全设置也不会被豁免。",
-                    style = MaterialTheme.typography.bodySmall
-                )
-                Text(
-                    "AI Limbs 交互周期由基座计算。达到周期只标记软过期，不会中断正在执行的工作；下一次进入 AI Limbs 时才重新建立系统接入提示与收据流程。配置缺失或异常时基座使用 30 分钟默认值。",
-                    style = MaterialTheme.typography.bodySmall
-                )
             }
         }
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -1147,6 +1146,16 @@ internal fun PluginAdminSecurityScreen(
             }
         )
     }
+    if (showResetInteractionCycle) {
+        ResetInteractionCycleDialog(
+            controlPlane = controlPlane,
+            onDismiss = { showResetInteractionCycle = false },
+            onReset = { result ->
+                interactionCycleTimeoutMs = result.policy.timeoutMs
+                showResetInteractionCycle = false
+            }
+        )
+    }
     newRecoveryKey?.let { key -> RecoveryKeyDialog(key) { newRecoveryKey = null } }
 }
 
@@ -1614,6 +1623,44 @@ private fun ChangeInteractionCycleDialog(
                     }.onFailure { error = it.message ?: "修改失败" }
                 }
             }) { Text(if (busy) "验证中…" else "确认修改") }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+private fun ResetInteractionCycleDialog(
+    controlPlane: PluginControlPlaneFacade,
+    onDismiss: () -> Unit,
+    onReset: (InteractionCycleResetResult) -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("刷新 AI 门禁") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("立即开启新的 AI Limbs 门禁，并从现在重新计算当前交互周期。")
+                PasswordField("当前管理员密码", password) { password = it }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy, onClick = {
+                scope.launch {
+                    busy = true
+                    val result = runCatching {
+                        withContext(Dispatchers.IO) { controlPlane.resetInteractionCycle(password) }
+                    }
+                    busy = false
+                    result.onSuccess { reset ->
+                        if (reset != null) onReset(reset) else error = "管理员密码不正确"
+                    }.onFailure { error = it.message ?: "刷新失败" }
+                }
+            }) { Text(if (busy) "刷新中…" else "确认刷新") }
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
     )
