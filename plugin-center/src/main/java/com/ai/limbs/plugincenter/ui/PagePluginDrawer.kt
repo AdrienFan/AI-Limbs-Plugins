@@ -33,6 +33,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowRight
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -150,6 +151,7 @@ internal fun PagePluginDrawer(
     var retainedParticipantKeys by remember(pageContext.pageId) {
         mutableStateOf(membershipPrefs.getStringSet(membershipPrefsKey, emptySet()).orEmpty().toSet())
     }
+    var disableRetentionKeys by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
     var expanded by remember(pageContext.pageId) { mutableStateOf(false) }
     var pluginSnapshots by remember { mutableStateOf<List<PluginControlSnapshot>>(emptyList()) }
     var childSnapshots by remember { mutableStateOf<List<ChildExtensionSnapshot>>(emptyList()) }
@@ -158,6 +160,7 @@ internal fun PagePluginDrawer(
     var providerPluginIds by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
     var feedback by remember(pageContext.pageId) { mutableStateOf<String?>(null) }
     var busyIds by remember(pageContext.pageId) { mutableStateOf<Set<String>>(emptySet()) }
+    var updateChoiceTarget by remember(pageContext.pageId) { mutableStateOf<PagePluginParticipant?>(null) }
     var updateTarget by remember(pageContext.pageId) { mutableStateOf<PagePluginParticipant?>(null) }
     var pendingDisable by remember(pageContext.pageId) { mutableStateOf<PagePluginParticipant?>(null) }
     var showAdminSetup by remember(pageContext.pageId) { mutableStateOf(false) }
@@ -201,7 +204,8 @@ internal fun PagePluginDrawer(
         pluginSnapshots,
         childSnapshots,
         pluginSnapshotsLoaded,
-        childSnapshotsLoaded
+        childSnapshotsLoaded,
+        disableRetentionKeys
     ) {
         val directKeys = directlyRenderedParticipants.mapTo(linkedSetOf(), ::participantMembershipKey)
         val pluginsById = pluginSnapshots.associateBy { it.plugin.pluginId }
@@ -209,6 +213,10 @@ internal fun PagePluginDrawer(
         val nextKeys = buildSet {
             addAll(directKeys)
             retainedParticipantKeys.forEach { key ->
+                if (key in disableRetentionKeys) {
+                    add(key)
+                    return@forEach
+                }
                 when {
                     key.startsWith(PLUGIN_MEMBER_PREFIX) -> {
                         if (!pluginSnapshotsLoaded) {
@@ -235,6 +243,18 @@ internal fun PagePluginDrawer(
             retainedParticipantKeys = nextKeys
             membershipPrefs.edit().putStringSet(membershipPrefsKey, nextKeys).apply()
         }
+        val confirmedDisableKeys = disableRetentionKeys.filterTo(linkedSetOf()) { key ->
+            when {
+                key.startsWith(PLUGIN_MEMBER_PREFIX) ->
+                    pluginsById[key.removePrefix(PLUGIN_MEMBER_PREFIX)]?.let(::retainPluginWhenNotRendered) == true
+                key.startsWith(CHILD_MEMBER_PREFIX) ->
+                    childrenById[key.removePrefix(CHILD_MEMBER_PREFIX)]?.let(::retainChildWhenNotRendered) == true
+                else -> false
+            }
+        }
+        if (confirmedDisableKeys.isNotEmpty()) {
+            disableRetentionKeys = disableRetentionKeys - confirmedDisableKeys
+        }
     }
     val participants = resolvePagePluginParticipants(
         pluginSnapshots = pluginSnapshots,
@@ -251,17 +271,34 @@ internal fun PagePluginDrawer(
     }
     if (participants.isEmpty()) return
 
-    fun runMutation(target: PagePluginParticipant, operation: suspend () -> Unit) {
+    fun runMutation(
+        target: PagePluginParticipant,
+        onFailure: (() -> Unit)? = null,
+        operation: suspend () -> Unit
+    ) {
         scope.launch {
             busyIds = busyIds + target.stableId
             runCatching { withContext(Dispatchers.IO) { operation() } }
-                .onFailure { feedback = it.message ?: it::class.java.simpleName }
+                .onFailure {
+                    feedback = it.message ?: it::class.java.simpleName
+                    onFailure?.invoke()
+                }
             busyIds = busyIds - target.stableId
         }
     }
 
     fun performDisable(target: PagePluginParticipant) {
-        runMutation(target) {
+        val membershipKey = participantMembershipKey(target)
+        disableRetentionKeys = disableRetentionKeys + membershipKey
+        if (membershipKey !in retainedParticipantKeys) {
+            val nextKeys = retainedParticipantKeys + membershipKey
+            retainedParticipantKeys = nextKeys
+            membershipPrefs.edit().putStringSet(membershipPrefsKey, nextKeys).apply()
+        }
+        runMutation(
+            target = target,
+            onFailure = { disableRetentionKeys = disableRetentionKeys - membershipKey }
+        ) {
             when (target) {
                 is PagePluginParticipant.Plugin -> controlPlane.disable(
                     target.stableId,
@@ -299,6 +336,29 @@ internal fun PagePluginDrawer(
             when (target) {
                 is PagePluginParticipant.Plugin -> controlPlane.enable(target.stableId)
                 is PagePluginParticipant.Child -> controlPlane.setChildExtensionEnabled(target.stableId, true)
+            }
+        }
+    }
+
+    fun onlineUpdateAvailable(target: PagePluginParticipant): Boolean = when (target) {
+        is PagePluginParticipant.Plugin -> controlPlane.canOnlineUpgrade(target.snapshot)
+        is PagePluginParticipant.Child -> {
+            val child = target.snapshot.toSummary()
+            val parent = pluginSnapshots.firstOrNull { it.plugin.pluginId == child.parentPluginId }
+            controlPlane.canOnlineUpgradeChild(child, parent)
+        }
+    }
+
+    fun performOnlineUpdate(target: PagePluginParticipant) {
+        runMutation(target) {
+            when (target) {
+                is PagePluginParticipant.Plugin -> controlPlane.onlineUpgrade(target.snapshot)
+                is PagePluginParticipant.Child -> {
+                    val child = target.snapshot.toSummary()
+                    val parent = pluginSnapshots.firstOrNull { it.plugin.pluginId == child.parentPluginId }
+                    requireNotNull(parent) { "找不到子插件所属插件：${child.parentPluginId}" }
+                    controlPlane.onlineUpgradeChild(child, parent)
+                }
             }
         }
     }
@@ -360,10 +420,7 @@ internal fun PagePluginDrawer(
                 busyIds = busyIds,
                 feedback = feedback,
                 onToggle = { target -> if (target.enabled) requestDisable(target) else performEnable(target) },
-                onUpdate = { target ->
-                    updateTarget = target
-                    updateLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
-                },
+                onUpdate = { target -> updateChoiceTarget = target },
                 modifier = Modifier.align(Alignment.CenterEnd).padding(end = 24.dp)
             )
         }
@@ -383,6 +440,44 @@ internal fun PagePluginDrawer(
                 )
             }
         }
+    }
+
+    updateChoiceTarget?.let { target ->
+        val onlineAvailable = onlineUpdateAvailable(target)
+        AlertDialog(
+            onDismissRequest = { updateChoiceTarget = null },
+            title = { Text("选择更新方式") },
+            text = {
+                Text(
+                    if (onlineAvailable)
+                        "${target.displayName}：请选择本地更新或在线更新。"
+                    else
+                        "${target.displayName}：当前在线更新不可用，可使用本地更新。"
+                )
+            },
+            confirmButton = {
+                Row {
+                    TextButton(
+                        onClick = {
+                            updateChoiceTarget = null
+                            updateTarget = target
+                            updateLauncher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                        },
+                        enabled = target.stableId !in busyIds
+                    ) { Text("本地更新") }
+                    TextButton(
+                        onClick = {
+                            updateChoiceTarget = null
+                            performOnlineUpdate(target)
+                        },
+                        enabled = onlineAvailable && target.stableId !in busyIds
+                    ) { Text("在线更新") }
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateChoiceTarget = null }) { Text("取消") }
+            }
+        )
     }
 
     if (showAdminSetup) {
