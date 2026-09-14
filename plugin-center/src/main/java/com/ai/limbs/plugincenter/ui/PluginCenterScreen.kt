@@ -164,6 +164,7 @@ fun PluginCenterScreen(
     var showAdminPassword by remember { mutableStateOf(false) }
     var showAdminRecovery by remember { mutableStateOf(false) }
     var recoveryKeyToShow by remember { mutableStateOf<String?>(null) }
+    var showQuickResetInteractionCycle by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     val homeSession = remember { PluginCenterHomeSessionState() }
     val homeListState = rememberLazyListState()
@@ -473,6 +474,7 @@ fun PluginCenterScreen(
                     session = homeSession,
                     listState = homeListState,
                     onOpenSettings = { requestAdmin(AdminAction.OpenSettings) },
+                    onResetInteractionCycle = { showQuickResetInteractionCycle = true },
                     onChoose = { choosePlugin() },
                     onClearCandidates = { candidates = emptyList() },
                     onRemoveCandidate = { target ->
@@ -673,6 +675,21 @@ fun PluginCenterScreen(
             pendingAdminAction = null
         }
     }
+
+    if (showQuickResetInteractionCycle) {
+        ResetInteractionCycleDialog(
+            controlPlane = controlPlane,
+            onDismiss = { showQuickResetInteractionCycle = false },
+            onReset = { reset ->
+                showQuickResetInteractionCycle = false
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        "本轮门禁已结束；下一次 AI 操作将重新经过门禁（generation=${reset.generation}）"
+                    )
+                }
+            }
+        )
+    }
 }
 @Composable
 private fun PluginCenterHome(
@@ -686,6 +703,7 @@ private fun PluginCenterHome(
     session: PluginCenterHomeSessionState,
     listState: androidx.compose.foundation.lazy.LazyListState,
     onOpenSettings: () -> Unit,
+    onResetInteractionCycle: () -> Unit,
     onChoose: () -> Unit,
     onInstall: () -> Unit,
     onClearCandidates: () -> Unit,
@@ -780,6 +798,10 @@ private fun PluginCenterHome(
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold
                     )
+                    TextButton(
+                        onClick = onResetInteractionCycle,
+                        enabled = !busy
+                    ) { Text("结束本轮门禁") }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "管理员安全与开发设置")
                     }

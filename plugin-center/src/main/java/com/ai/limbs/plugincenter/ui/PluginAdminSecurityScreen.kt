@@ -1629,7 +1629,7 @@ private fun ChangeInteractionCycleDialog(
 }
 
 @Composable
-private fun ResetInteractionCycleDialog(
+internal fun ResetInteractionCycleDialog(
     controlPlane: PluginControlPlaneFacade,
     onDismiss: () -> Unit,
     onReset: (InteractionCycleResetResult) -> Unit
