@@ -69,7 +69,6 @@ import com.ai.limbs.plugincenter.model.HostSurfaceSnapshot
 import com.ai.limbs.plugincenter.model.HostPrimitiveSnapshot
 import com.ai.limbs.plugincenter.model.InactivityThresholdMode
 import com.ai.limbs.plugincenter.model.InteractionCyclePolicySnapshot
-import com.ai.limbs.plugincenter.model.InteractionCycleResetResult
 import com.ai.limbs.plugincenter.model.PluginBackupPolicyStore
 import com.ai.limbs.plugincenter.model.PluginBackupSnapshot
 import com.ai.limbs.plugincenter.runtime.PluginControlPlaneFacade
@@ -1157,8 +1156,8 @@ internal fun PluginAdminSecurityScreen(
             controlPlane = controlPlane,
             endCurrent = endCurrent,
             onDismiss = { resetInteractionCycleAsEnd = null },
-            onReset = { result ->
-                interactionCycleTimeoutMs = result.policy.timeoutMs
+            onChanged = { policy ->
+                interactionCycleTimeoutMs = policy.timeoutMs
                 resetInteractionCycleAsEnd = null
             }
         )
@@ -1640,7 +1639,7 @@ private fun ResetInteractionCycleDialog(
     controlPlane: PluginControlPlaneFacade,
     endCurrent: Boolean,
     onDismiss: () -> Unit,
-    onReset: (InteractionCycleResetResult) -> Unit
+    onChanged: (InteractionCyclePolicySnapshot) -> Unit
 ) {
     var password by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
@@ -1653,7 +1652,7 @@ private fun ResetInteractionCycleDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     if (endCurrent) {
-                        "立即结束当前 AI Limbs 门禁周期；下一次 AI 操作将重新经过门禁，并从现在重新计算交互周期。"
+                        "立即结束当前 AI Limbs 门禁周期；下一次 AI 操作将重新经过门禁，并从下一次 AI 操作开始重新计算交互周期。"
                     } else {
                         "立即刷新 AI Limbs 门禁并开启新的交互周期，从现在重新计算周期时间。"
                     }
@@ -1667,11 +1666,17 @@ private fun ResetInteractionCycleDialog(
                 scope.launch {
                     busy = true
                     val result = runCatching {
-                        withContext(Dispatchers.IO) { controlPlane.resetInteractionCycle(password) }
+                        withContext(Dispatchers.IO) {
+                            if (endCurrent) {
+                                controlPlane.closeInteractionCycle(password)
+                            } else {
+                                controlPlane.resetInteractionCycle(password)?.policy
+                            }
+                        }
                     }
                     busy = false
-                    result.onSuccess { reset ->
-                        if (reset != null) onReset(reset) else error = "管理员密码不正确"
+                    result.onSuccess { policy ->
+                        if (policy != null) onChanged(policy) else error = "管理员密码不正确"
                     }.onFailure { error = it.message ?: "操作失败" }
                 }
             }) { Text(if (busy) "处理中…" else if (endCurrent) "确认结束" else "确认刷新") }

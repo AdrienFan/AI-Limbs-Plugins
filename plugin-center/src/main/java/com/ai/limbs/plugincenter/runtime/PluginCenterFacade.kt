@@ -83,6 +83,17 @@ internal class PluginControlPlaneFacade(
         )
     }
 
+    suspend fun closeInteractionCycle(password: String): InteractionCyclePolicySnapshot? {
+        val result = invokeHostPrimitive(
+            INTERACTION_CYCLE_PRIMITIVE_ID,
+            "close",
+            JSONObject().put("admin_password", password)
+        )
+        if (!result.optBoolean("authorized", false)) return null
+        check(result.optBoolean("closed", false)) { "基座未关闭当前 AI 门禁周期" }
+        return parseInteractionCyclePolicy(result)
+    }
+
     suspend fun setDeveloperMode(enabled: Boolean) =
         host.pluginPlatform.setDeveloperMode(enabled)
 
