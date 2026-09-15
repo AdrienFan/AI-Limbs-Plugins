@@ -84,14 +84,14 @@ internal class PluginControlPlaneFacade(
         )
     }
 
-    suspend fun closeInteractionCycle(password: String): InteractionCyclePolicySnapshot? {
+    suspend fun releaseInteractionGate(password: String): InteractionCyclePolicySnapshot? {
         val result = invokeHostPrimitive(
             INTERACTION_CYCLE_PRIMITIVE_ID,
-            "close",
+            "release_gate",
             JSONObject().put("admin_password", password)
         )
         if (!result.optBoolean("authorized", false)) return null
-        check(result.optBoolean("closed", false)) { "基座未关闭当前 AI 门禁周期" }
+        check(result.optBoolean("gate_released", false)) { "基座未结束本轮 AI 门禁" }
         return parseInteractionCyclePolicy(result)
     }
 

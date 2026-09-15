@@ -100,6 +100,11 @@ private enum class InteractionCycleUnit(val label: String, val multiplierMs: Lon
     DAYS("天", 24L * 60L * 60L * 1000L)
 }
 
+private enum class InteractionGateAction {
+    REFRESH,
+    RELEASE
+}
+
 private data class InteractionCycleOption(val timeoutMs: Long, val label: String)
 private val INTERACTION_CYCLE_OPTIONS = listOf(
     InteractionCycleOption(DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS, "30 分钟（默认）"),
@@ -307,7 +312,7 @@ internal fun PluginAdminSecurityScreen(
     var interactionCycleExpanded by remember { mutableStateOf(false) }
     var showCustomInteractionCycle by remember { mutableStateOf(false) }
     var pendingInteractionCycleTimeoutMs by remember { mutableStateOf<Long?>(null) }
-    var resetInteractionCycleAsEnd by remember { mutableStateOf<Boolean?>(null) }
+    var pendingInteractionGateAction by remember { mutableStateOf<InteractionGateAction?>(null) }
     var residentRuntimeEnabled by remember { mutableStateOf(false) }
     var residentRuntimePhase by remember { mutableStateOf("unknown") }
     var residentRuntimeError by remember { mutableStateOf<String?>(null) }
@@ -639,12 +644,12 @@ internal fun PluginAdminSecurityScreen(
                         }
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
-                                onClick = { resetInteractionCycleAsEnd = false },
+                                onClick = { pendingInteractionGateAction = InteractionGateAction.REFRESH },
                                 enabled = !busy,
                                 modifier = Modifier.weight(1f)
                             ) { Text("刷新本轮门禁") }
                             OutlinedButton(
-                                onClick = { resetInteractionCycleAsEnd = true },
+                                onClick = { pendingInteractionGateAction = InteractionGateAction.RELEASE },
                                 enabled = !busy,
                                 modifier = Modifier.weight(1f)
                             ) { Text("结束本轮门禁") }
@@ -1254,14 +1259,14 @@ internal fun PluginAdminSecurityScreen(
             }
         )
     }
-    resetInteractionCycleAsEnd?.let { endCurrent ->
-        ResetInteractionCycleDialog(
+    pendingInteractionGateAction?.let { action ->
+        InteractionGateActionDialog(
             controlPlane = controlPlane,
-            endCurrent = endCurrent,
-            onDismiss = { resetInteractionCycleAsEnd = null },
+            action = action,
+            onDismiss = { pendingInteractionGateAction = null },
             onChanged = { policy ->
                 interactionCycleTimeoutMs = policy.timeoutMs
-                resetInteractionCycleAsEnd = null
+                pendingInteractionGateAction = null
             }
         )
     }
@@ -1738,9 +1743,9 @@ private fun ChangeInteractionCycleDialog(
 }
 
 @Composable
-private fun ResetInteractionCycleDialog(
+private fun InteractionGateActionDialog(
     controlPlane: PluginControlPlaneFacade,
-    endCurrent: Boolean,
+    action: InteractionGateAction,
     onDismiss: () -> Unit,
     onChanged: (InteractionCyclePolicySnapshot) -> Unit
 ) {
@@ -1750,12 +1755,12 @@ private fun ResetInteractionCycleDialog(
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(if (endCurrent) "结束本轮门禁" else "刷新本轮门禁") },
+        title = { Text(if (action == InteractionGateAction.RELEASE) "结束本轮门禁" else "刷新本轮门禁") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    if (endCurrent) {
-                        "立即结束当前 AI Limbs 门禁周期；下一次 AI 操作将重新经过门禁，并从下一次 AI 操作开始重新计算交互周期。"
+                    if (action == InteractionGateAction.RELEASE) {
+                        "立即结束当前 AI Limbs 门禁限制；当前交互周期保持不变，本轮后续 AI 操作将直接放行，直到本轮 Interaction Cycle 自然结束或手动刷新门禁。"
                     } else {
                         "立即刷新本轮 AI Limbs 门禁并开启新的交互周期，从现在重新计算周期时间。"
                     }
@@ -1770,8 +1775,8 @@ private fun ResetInteractionCycleDialog(
                     busy = true
                     val result = runCatching {
                         withContext(Dispatchers.IO) {
-                            if (endCurrent) {
-                                controlPlane.closeInteractionCycle(password)
+                            if (action == InteractionGateAction.RELEASE) {
+                                controlPlane.releaseInteractionGate(password)
                             } else {
                                 controlPlane.resetInteractionCycle(password)?.policy
                             }
@@ -1782,7 +1787,13 @@ private fun ResetInteractionCycleDialog(
                         if (policy != null) onChanged(policy) else error = "管理员密码不正确"
                     }.onFailure { error = it.message ?: "操作失败" }
                 }
-            }) { Text(if (busy) "处理中…" else if (endCurrent) "确认结束" else "确认刷新") }
+            }) {
+                Text(
+                    if (busy) "处理中…"
+                    else if (action == InteractionGateAction.RELEASE) "确认结束"
+                    else "确认刷新"
+                )
+            }
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
     )
