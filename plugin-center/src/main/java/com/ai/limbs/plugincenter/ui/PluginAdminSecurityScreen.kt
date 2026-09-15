@@ -613,7 +613,7 @@ internal fun PluginAdminSecurityScreen(
                         OutlinedButton(
                             onClick = { showResetInteractionCycle = true },
                             enabled = !busy
-                        ) { Text("刷新 AI 门禁") }
+                        ) { Text("结束本轮门禁") }
                     }
                 }
             }
@@ -1629,7 +1629,7 @@ private fun ChangeInteractionCycleDialog(
 }
 
 @Composable
-internal fun ResetInteractionCycleDialog(
+private fun ResetInteractionCycleDialog(
     controlPlane: PluginControlPlaneFacade,
     onDismiss: () -> Unit,
     onReset: (InteractionCycleResetResult) -> Unit
@@ -1640,10 +1640,10 @@ internal fun ResetInteractionCycleDialog(
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text("刷新 AI 门禁") },
+        title = { Text("结束本轮门禁") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("立即开启新的 AI Limbs 门禁，并从现在重新计算当前交互周期。")
+                Text("立即结束当前 AI Limbs 门禁周期；下一次 AI 操作将重新经过门禁，并从现在重新计算交互周期。")
                 PasswordField("当前管理员密码", password) { password = it }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
@@ -1658,9 +1658,9 @@ internal fun ResetInteractionCycleDialog(
                     busy = false
                     result.onSuccess { reset ->
                         if (reset != null) onReset(reset) else error = "管理员密码不正确"
-                    }.onFailure { error = it.message ?: "刷新失败" }
+                    }.onFailure { error = it.message ?: "操作失败" }
                 }
-            }) { Text(if (busy) "刷新中…" else "确认刷新") }
+            }) { Text(if (busy) "处理中…" else "确认结束") }
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
     )
