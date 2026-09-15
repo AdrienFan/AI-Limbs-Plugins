@@ -10,8 +10,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -311,6 +313,7 @@ internal fun PluginAdminSecurityScreen(
     var residentRuntimeError by remember { mutableStateOf<String?>(null) }
     var residentRuntimeLoaded by remember { mutableStateOf(false) }
     var residentToggleBusy by remember { mutableStateOf(false) }
+    var residentDetailsExpanded by remember { mutableStateOf(false) }
     var surfaceQuery by remember { mutableStateOf("") }
     var newRecoveryKey by remember { mutableStateOf<String?>(null) }
     var maintenanceStatus by remember {
@@ -548,36 +551,41 @@ internal fun PluginAdminSecurityScreen(
             TextButton(onClick = onBack) { Text("← 插件管理") }
         }
         Text("管理员安全中心", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(18.dp),
-                    verticalAlignment = Alignment.Top
-                ) {
+        Row(
+            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Card(modifier = Modifier.weight(1f).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                     Column(
-                        modifier = Modifier.weight(1.15f),
+                        modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text("管理员凭据", fontWeight = FontWeight.Bold)
                         Text("管理员密码：已设置")
                         Text("恢复密钥：${if (adminSecurity.snapshot().recoveryConfigured) "已配置" else "未配置"}")
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy) { Text("修改密码") }
-                            OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy) { Text("重新生成恢复密钥") }
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("修改密码") }
+                            OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("重新生成恢复密钥") }
                         }
-                    }
+            }
+            }
+            Card(modifier = Modifier.weight(1f).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                     Column(
-                        modifier = Modifier.weight(0.85f),
+                        modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("普通插件验证频率", fontWeight = FontWeight.Medium)
-                        Box {
+                        Text("AI Limbs 门禁策略", fontWeight = FontWeight.Bold)
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             OutlinedButton(
                                 onClick = { authFrequencyExpanded = true },
-                                enabled = !busy
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(adminAuthFrequencyLabel(authFrequency))
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("普通插件验证频率", modifier = Modifier.weight(1f))
+                                    Text(adminAuthFrequencyLabel(authFrequency))
+                                }
                             }
                             DropdownMenu(
                                 expanded = authFrequencyExpanded,
@@ -594,13 +602,16 @@ internal fun PluginAdminSecurityScreen(
                                 }
                             }
                         }
-                        Text("AI Limbs 交互周期", fontWeight = FontWeight.Medium)
-                        Box {
+                        Box(modifier = Modifier.fillMaxWidth()) {
                             OutlinedButton(
                                 onClick = { interactionCycleExpanded = true },
-                                enabled = !busy
+                                enabled = !busy,
+                                modifier = Modifier.fillMaxWidth()
                             ) {
-                                Text(interactionCycleLabel(interactionCycleTimeoutMs))
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("AI Limbs 交互周期", modifier = Modifier.weight(1f))
+                                    Text(interactionCycleLabel(interactionCycleTimeoutMs))
+                                }
                             }
                             DropdownMenu(
                                 expanded = interactionCycleExpanded,
@@ -626,19 +637,23 @@ internal fun PluginAdminSecurityScreen(
                                 )
                             }
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(
                                 onClick = { resetInteractionCycleAsEnd = false },
-                                enabled = !busy
-                            ) { Text("刷新 AI 门禁") }
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f)
+                            ) { Text("刷新本轮门禁") }
                             OutlinedButton(
                                 onClick = { resetInteractionCycleAsEnd = true },
-                                enabled = !busy
+                                enabled = !busy,
+                                modifier = Modifier.weight(1f)
                             ) { Text("结束本轮门禁") }
                         }
-                    }
-                }
-                Divider()
+            }
+            }
+        }
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
@@ -656,9 +671,9 @@ internal fun PluginAdminSecurityScreen(
                             }
                         )
                         Text(
-                            residentRuntimeError ?: "开启后业务核心切换到 Resident Core；关闭后回到普通 Host。切换期间 Host 可能自动重启。",
+                            "开启后由 Resident Core 接管后台业务；关闭后回到普通 Host。切换期间 Host 可能自动重启。",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (residentRuntimeError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
@@ -668,6 +683,7 @@ internal fun PluginAdminSecurityScreen(
                             residentRuntimeEnabled = target
                             residentRuntimePhase = if (target) "starting" else "stopping"
                             residentRuntimeError = null
+                            residentDetailsExpanded = false
                             residentToggleBusy = true
                             scope.launch {
                                 val result = runCatching {
@@ -700,6 +716,13 @@ internal fun PluginAdminSecurityScreen(
                             }
                         }
                     )
+                }
+                if (residentRuntimeError != null) {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("运行时返回了错误，可展开查看诊断详情。", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        TextButton(onClick = { residentDetailsExpanded = !residentDetailsExpanded }) { Text(if (residentDetailsExpanded) "收起" else "详情") }
+                    }
+                    if (residentDetailsExpanded) Text(residentRuntimeError.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                 }
             }
         }
@@ -1727,14 +1750,14 @@ private fun ResetInteractionCycleDialog(
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(if (endCurrent) "结束本轮门禁" else "刷新 AI 门禁") },
+        title = { Text(if (endCurrent) "结束本轮门禁" else "刷新本轮门禁") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     if (endCurrent) {
                         "立即结束当前 AI Limbs 门禁周期；下一次 AI 操作将重新经过门禁，并从下一次 AI 操作开始重新计算交互周期。"
                     } else {
-                        "立即刷新 AI Limbs 门禁并开启新的交互周期，从现在重新计算周期时间。"
+                        "立即刷新本轮 AI Limbs 门禁并开启新的交互周期，从现在重新计算周期时间。"
                     }
                 )
                 PasswordField("当前管理员密码", password) { password = it }
