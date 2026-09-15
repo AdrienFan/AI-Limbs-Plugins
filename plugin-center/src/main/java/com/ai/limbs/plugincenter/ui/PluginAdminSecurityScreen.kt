@@ -306,6 +306,11 @@ internal fun PluginAdminSecurityScreen(
     var showCustomInteractionCycle by remember { mutableStateOf(false) }
     var pendingInteractionCycleTimeoutMs by remember { mutableStateOf<Long?>(null) }
     var resetInteractionCycleAsEnd by remember { mutableStateOf<Boolean?>(null) }
+    var residentRuntimeEnabled by remember { mutableStateOf(false) }
+    var residentRuntimePhase by remember { mutableStateOf("unknown") }
+    var residentRuntimeError by remember { mutableStateOf<String?>(null) }
+    var residentRuntimeLoaded by remember { mutableStateOf(false) }
+    var residentToggleBusy by remember { mutableStateOf(false) }
     var surfaceQuery by remember { mutableStateOf("") }
     var newRecoveryKey by remember { mutableStateOf<String?>(null) }
     var maintenanceStatus by remember {
@@ -440,6 +445,18 @@ internal fun PluginAdminSecurityScreen(
         interactionCycleTimeoutMs = runCatching {
             withContext(Dispatchers.IO) { controlPlane.interactionCyclePolicy().timeoutMs }
         }.getOrDefault(DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS)
+        runCatching { withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() } }
+            .onSuccess { resident ->
+                residentRuntimeEnabled = resident.enabled
+                residentRuntimePhase = resident.phase
+                residentRuntimeError = resident.lastError
+                residentRuntimeLoaded = true
+            }
+            .onFailure {
+                residentRuntimePhase = "unavailable"
+                residentRuntimeError = "常驻进程状态不可用，请确认基座已暴露 Resident Runtime 控制面。"
+                residentRuntimeLoaded = false
+            }
     }
 
     val normalizedPrimitiveQuery = primitiveQuery.trim().lowercase()
@@ -620,6 +637,69 @@ internal fun PluginAdminSecurityScreen(
                             ) { Text("结束本轮门禁") }
                         }
                     }
+                }
+                Divider()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text("AI Limbs 常驻进程", fontWeight = FontWeight.Bold)
+                        Text(
+                            residentRuntimePhaseLabel(residentRuntimePhase, residentRuntimeEnabled),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (residentRuntimePhase == "failed" || residentRuntimePhase == "off_failed") {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                        Text(
+                            residentRuntimeError ?: "开启后业务核心切换到 Resident Core；关闭后回到普通 Host。切换期间 Host 可能自动重启。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (residentRuntimeError != null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = residentRuntimeEnabled,
+                        enabled = residentRuntimeLoaded && !busy && !residentToggleBusy,
+                        onCheckedChange = { target ->
+                            residentRuntimeEnabled = target
+                            residentRuntimePhase = if (target) "starting" else "stopping"
+                            residentRuntimeError = null
+                            residentToggleBusy = true
+                            scope.launch {
+                                val result = runCatching {
+                                    withContext(Dispatchers.IO) { controlPlane.setResidentRuntimeEnabled(target) }
+                                }
+                                result.onSuccess { resident ->
+                                    residentRuntimeEnabled = resident.enabled
+                                    residentRuntimePhase = resident.phase
+                                    residentRuntimeError = resident.lastError
+                                    residentRuntimeLoaded = true
+                                }.onFailure { error ->
+                                    val refreshed = runCatching {
+                                        withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() }
+                                    }.getOrNull()
+                                    if (refreshed != null) {
+                                        residentRuntimeEnabled = refreshed.enabled
+                                        residentRuntimePhase = refreshed.phase
+                                        residentRuntimeError = refreshed.lastError
+                                        residentRuntimeLoaded = true
+                                        if (refreshed.enabled != target || refreshed.lastError != null) onError(error)
+                                    } else {
+                                        residentRuntimeLoaded = false
+                                    }
+                                    // A successful ON/OFF role transition may terminate/restart this Host before
+                                    // the RPC can return. If status is temporarily unreachable, keep the target
+                                    // state optimistic but disable further toggles; the rebuilt Host reloads the
+                                    // authoritative value before the control becomes interactive again.
+                                }
+                                residentToggleBusy = false
+                            }
+                        }
+                    )
                 }
             }
         }
@@ -1683,6 +1763,19 @@ private fun ResetInteractionCycleDialog(
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
     )
+}
+
+private fun residentRuntimePhaseLabel(phase: String, enabled: Boolean): String = when (phase) {
+    "on" -> "已开启 · Resident Core 已接管"
+    "host_attach_pending" -> "已开启 · 正在连接 Host UI"
+    "handoff" -> "正在切换到 Resident Core"
+    "starting", "starting_guardian" -> "正在启动常驻进程"
+    "stopping" -> "正在关闭常驻进程"
+    "off" -> "已关闭 · 普通 Host 模式"
+    "failed" -> "常驻进程开启失败"
+    "off_failed" -> "常驻进程关闭失败"
+    "unavailable" -> "常驻进程状态不可用"
+    else -> if (enabled) "已开启 · $phase" else if (phase == "unknown") "正在读取状态…" else "已关闭 · $phase"
 }
 
 @Composable

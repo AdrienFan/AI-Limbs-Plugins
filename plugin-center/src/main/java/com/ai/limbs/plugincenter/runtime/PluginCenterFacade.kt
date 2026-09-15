@@ -20,6 +20,7 @@ internal data class PluginInstallOptions(
 private const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
 private const val CHILD_ONLINE_UPDATE_ROLE = "online_update"
 private const val INTERACTION_CYCLE_PRIMITIVE_ID = "host.interaction.cycle@1"
+private const val RESIDENT_RUNTIME_PRIMITIVE_ID = "host.resident.runtime@1"
 
 internal class PluginControlPlaneFacade(
     private val host: SystemPluginHostV2
@@ -93,6 +94,18 @@ internal class PluginControlPlaneFacade(
         check(result.optBoolean("closed", false)) { "基座未关闭当前 AI 门禁周期" }
         return parseInteractionCyclePolicy(result)
     }
+
+    suspend fun residentRuntimeStatus(): ResidentRuntimeSnapshot =
+        parseResidentRuntime(invokeHostPrimitive(RESIDENT_RUNTIME_PRIMITIVE_ID, "status"))
+
+    suspend fun setResidentRuntimeEnabled(enabled: Boolean): ResidentRuntimeSnapshot =
+        parseResidentRuntime(
+            invokeHostPrimitive(
+                RESIDENT_RUNTIME_PRIMITIVE_ID,
+                "set_enabled",
+                JSONObject().put("enabled", enabled)
+            )
+        )
 
     suspend fun setDeveloperMode(enabled: Boolean) =
         host.pluginPlatform.setDeveloperMode(enabled)
@@ -568,6 +581,16 @@ private fun parseInteractionCyclePolicy(json: JSONObject) = InteractionCyclePoli
     defaultTimeoutMs = json.optLong("default_timeout_ms", 30L * 60L * 1000L),
     configured = json.optBoolean("configured", false),
     source = json.optString("source", "default")
+)
+
+private fun parseResidentRuntime(json: JSONObject) = ResidentRuntimeSnapshot(
+    enabled = json.optBoolean("enabled", false),
+    phase = json.optString("runtime_phase", if (json.optBoolean("enabled", false)) "starting" else "off"),
+    owner = json.optString("runtime_owner", "unavailable"),
+    lastError = json.opt("last_error")
+        ?.takeUnless { it == JSONObject.NULL }
+        ?.toString()
+        ?.takeIf { it.isNotBlank() }
 )
 
 private fun parseAdminStatus(json: JSONObject) = AdminSecuritySnapshot(

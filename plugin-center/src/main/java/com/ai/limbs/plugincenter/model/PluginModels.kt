@@ -167,6 +167,12 @@ data class InteractionCycleResetResult(
     val appliedImmediately: Boolean,
     val cycleStartedAtMs: Long
 )
+data class ResidentRuntimeSnapshot(
+    val enabled: Boolean,
+    val phase: String,
+    val owner: String,
+    val lastError: String?
+)
 data class AdminSecuritySnapshot(
     val configured: Boolean,
     val recoveryConfigured: Boolean,
