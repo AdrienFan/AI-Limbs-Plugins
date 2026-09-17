@@ -171,8 +171,20 @@ data class ResidentRuntimeSnapshot(
     val enabled: Boolean,
     val phase: String,
     val owner: String,
+    val guardianRunning: Boolean,
+    val coreRunning: Boolean,
+    val coreReachable: Boolean,
     val lastError: String?
-)
+) {
+    val actualRunning: Boolean
+        get() = guardianRunning || coreRunning || coreReachable || owner == "resident_core"
+
+    val switchChecked: Boolean
+        get() = enabled || actualRunning
+
+    val stateMismatch: Boolean
+        get() = !enabled && actualRunning
+}
 data class AdminSecuritySnapshot(
     val configured: Boolean,
     val recoveryConfigured: Boolean,

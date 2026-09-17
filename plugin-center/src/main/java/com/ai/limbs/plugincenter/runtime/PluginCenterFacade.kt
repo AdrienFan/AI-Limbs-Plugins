@@ -587,6 +587,9 @@ private fun parseResidentRuntime(json: JSONObject) = ResidentRuntimeSnapshot(
     enabled = json.optBoolean("enabled", false),
     phase = json.optString("runtime_phase", if (json.optBoolean("enabled", false)) "starting" else "off"),
     owner = json.optString("runtime_owner", "unavailable"),
+    guardianRunning = json.optBoolean("guardian_process_alive", json.optBoolean("running", false)),
+    coreRunning = json.optBoolean("core_process_alive", json.optBoolean("core_running", false)),
+    coreReachable = json.optBoolean("core_reachable", json.optBoolean("core_running", false)),
     lastError = json.opt("last_error")
         ?.takeUnless { it == JSONObject.NULL }
         ?.toString()

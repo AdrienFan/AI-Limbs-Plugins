@@ -314,6 +314,8 @@ internal fun PluginAdminSecurityScreen(
     var pendingInteractionCycleTimeoutMs by remember { mutableStateOf<Long?>(null) }
     var pendingInteractionGateAction by remember { mutableStateOf<InteractionGateAction?>(null) }
     var residentRuntimeEnabled by remember { mutableStateOf(false) }
+    var residentRuntimeSwitchChecked by remember { mutableStateOf(false) }
+    var residentRuntimeStateMismatch by remember { mutableStateOf(false) }
     var residentRuntimePhase by remember { mutableStateOf("unknown") }
     var residentRuntimeError by remember { mutableStateOf<String?>(null) }
     var residentRuntimeLoaded by remember { mutableStateOf(false) }
@@ -456,6 +458,8 @@ internal fun PluginAdminSecurityScreen(
         runCatching { withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() } }
             .onSuccess { resident ->
                 residentRuntimeEnabled = resident.enabled
+                residentRuntimeSwitchChecked = resident.switchChecked
+                residentRuntimeStateMismatch = resident.stateMismatch
                 residentRuntimePhase = resident.phase
                 residentRuntimeError = resident.lastError
                 residentRuntimeLoaded = true
@@ -680,22 +684,39 @@ internal fun PluginAdminSecurityScreen(
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                        if (residentRuntimeStateMismatch) {
+                            Text(
+                                "检测到期望状态为关闭，但 Resident/Guardian 仍在运行。开关按实际状态保持开启；再次关闭会继续执行清理。",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                     Switch(
-                        checked = residentRuntimeEnabled,
+                        checked = residentRuntimeSwitchChecked,
                         enabled = residentRuntimeLoaded && !busy && !residentToggleBusy,
                         onCheckedChange = { target ->
                             residentRuntimeEnabled = target
+                            residentRuntimeSwitchChecked = target
+                            residentRuntimeStateMismatch = false
                             residentRuntimePhase = if (target) "starting" else "stopping"
                             residentRuntimeError = null
                             residentDetailsExpanded = false
                             residentToggleBusy = true
                             scope.launch {
+                                val before = runCatching {
+                                    withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() }
+                                }.getOrNull()
+                                if (before != null) {
+                                    residentRuntimeStateMismatch = before.stateMismatch
+                                }
                                 val result = runCatching {
                                     withContext(Dispatchers.IO) { controlPlane.setResidentRuntimeEnabled(target) }
                                 }
                                 result.onSuccess { resident ->
                                     residentRuntimeEnabled = resident.enabled
+                                    residentRuntimeSwitchChecked = resident.switchChecked
+                                    residentRuntimeStateMismatch = resident.stateMismatch
                                     residentRuntimePhase = resident.phase
                                     residentRuntimeError = resident.lastError
                                     residentRuntimeLoaded = true
@@ -705,10 +726,12 @@ internal fun PluginAdminSecurityScreen(
                                     }.getOrNull()
                                     if (refreshed != null) {
                                         residentRuntimeEnabled = refreshed.enabled
+                                        residentRuntimeSwitchChecked = refreshed.switchChecked
+                                        residentRuntimeStateMismatch = refreshed.stateMismatch
                                         residentRuntimePhase = refreshed.phase
                                         residentRuntimeError = refreshed.lastError
                                         residentRuntimeLoaded = true
-                                        if (refreshed.enabled != target || refreshed.lastError != null) onError(error)
+                                        if (refreshed.switchChecked != target || refreshed.lastError != null) onError(error)
                                     } else {
                                         residentRuntimeLoaded = false
                                     }
