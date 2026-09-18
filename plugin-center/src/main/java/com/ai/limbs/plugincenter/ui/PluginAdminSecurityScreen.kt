@@ -80,6 +80,7 @@ import com.ai.limbs.plugincenter.model.PluginInactivityPolicyStore
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -103,6 +104,16 @@ private enum class InteractionCycleUnit(val label: String, val multiplierMs: Lon
 private enum class InteractionGateAction {
     REFRESH,
     RELEASE
+}
+
+private fun formatCycleRemaining(remainingMs: Long): String {
+    val totalSeconds = (remainingMs.coerceAtLeast(0L) + 999L) / 1000L
+    val hours = totalSeconds / 3600L
+    val minutes = (totalSeconds % 3600L) / 60L
+    val seconds = totalSeconds % 60L
+    return hours.toString().padStart(2, '0') + ":" +
+        minutes.toString().padStart(2, '0') + ":" +
+        seconds.toString().padStart(2, '0')
 }
 
 private data class InteractionCycleOption(val timeoutMs: Long, val label: String)
@@ -309,6 +320,10 @@ internal fun PluginAdminSecurityScreen(
     var authFrequencyExpanded by remember { mutableStateOf(false) }
     var pendingAuthFrequency by remember { mutableStateOf<AdminAuthFrequency?>(null) }
     var interactionCycleTimeoutMs by remember { mutableStateOf(DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS) }
+    var interactionCycleStartedAtMs by remember { mutableStateOf(0L) }
+    var interactionCycleExpiredPending by remember { mutableStateOf(false) }
+    var interactionGateReleased by remember { mutableStateOf(false) }
+    var interactionCycleNowMs by remember { mutableStateOf(System.currentTimeMillis()) }
     var interactionCycleExpanded by remember { mutableStateOf(false) }
     var showCustomInteractionCycle by remember { mutableStateOf(false) }
     var pendingInteractionCycleTimeoutMs by remember { mutableStateOf<Long?>(null) }
@@ -330,6 +345,20 @@ internal fun PluginAdminSecurityScreen(
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+
+    fun applyInteractionCycleSnapshot(snapshot: InteractionCyclePolicySnapshot) {
+        interactionCycleTimeoutMs = snapshot.timeoutMs
+        interactionCycleStartedAtMs = snapshot.cycleStartedAtMs
+        interactionCycleExpiredPending = snapshot.expiredPending
+        interactionGateReleased = snapshot.gateReleased
+    }
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            interactionCycleNowMs = System.currentTimeMillis()
+            delay(1000L)
+        }
+    }
 
     fun returnToToolbox(message: String) {
         navigator.backToToolbox(message)
@@ -452,9 +481,10 @@ internal fun PluginAdminSecurityScreen(
         inactivitySeconds = inactivity.testSeconds.toString()
         backupAutoEnabled = controlPlane.backupPolicySnapshot().enabled
         authFrequency = adminSecurity.authFrequency()
-        interactionCycleTimeoutMs = runCatching {
-            withContext(Dispatchers.IO) { controlPlane.interactionCyclePolicy().timeoutMs }
-        }.getOrDefault(DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS)
+        runCatching {
+            withContext(Dispatchers.IO) { controlPlane.interactionCyclePolicy() }
+        }.onSuccess(::applyInteractionCycleSnapshot)
+            .onFailure { interactionCycleTimeoutMs = DEFAULT_INTERACTION_CYCLE_TIMEOUT_MS }
         runCatching { withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() } }
             .onSuccess { resident ->
                 residentRuntimeEnabled = resident.enabled
@@ -469,6 +499,20 @@ internal fun PluginAdminSecurityScreen(
                 residentRuntimeError = "常驻进程状态不可用，请确认基座已暴露 Resident Runtime 控制面。"
                 residentRuntimeLoaded = false
             }
+    }
+
+    val interactionCycleRemainingMs = interactionCycleStartedAtMs
+        .takeIf { it > 0L }
+        ?.let { startedAt -> (startedAt + interactionCycleTimeoutMs - interactionCycleNowMs).coerceAtLeast(0L) }
+    val interactionCycleExpired = interactionCycleExpiredPending || interactionCycleRemainingMs == 0L
+    val interactionCycleStatusText = when {
+        interactionCycleStartedAtMs <= 0L -> "周期　读取中…"
+        interactionCycleExpired -> "周期　已到期"
+        else -> buildString {
+            append("周期　剩余 ")
+            append(formatCycleRemaining(interactionCycleRemainingMs ?: 0L))
+            if (interactionGateReleased) append(" · 已释放")
+        }
     }
 
     val normalizedPrimitiveQuery = primitiveQuery.trim().lowercase()
@@ -577,6 +621,11 @@ internal fun PluginAdminSecurityScreen(
                             OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("修改密码") }
                             OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("重新生成恢复密钥") }
                         }
+                        Text(
+                            interactionCycleStatusText,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
             }
             }
             Card(modifier = Modifier.weight(1f).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -656,7 +705,7 @@ internal fun PluginAdminSecurityScreen(
                                 onClick = { pendingInteractionGateAction = InteractionGateAction.RELEASE },
                                 enabled = !busy,
                                 modifier = Modifier.weight(1f)
-                            ) { Text("结束本轮门禁") }
+                            ) { Text("释放本轮门禁") }
                         }
             }
             }
@@ -1277,7 +1326,7 @@ internal fun PluginAdminSecurityScreen(
             targetTimeoutMs = targetTimeoutMs,
             onDismiss = { pendingInteractionCycleTimeoutMs = null },
             onChanged = { snapshot ->
-                interactionCycleTimeoutMs = snapshot.timeoutMs
+                applyInteractionCycleSnapshot(snapshot)
                 pendingInteractionCycleTimeoutMs = null
             }
         )
@@ -1288,7 +1337,7 @@ internal fun PluginAdminSecurityScreen(
             action = action,
             onDismiss = { pendingInteractionGateAction = null },
             onChanged = { policy ->
-                interactionCycleTimeoutMs = policy.timeoutMs
+                applyInteractionCycleSnapshot(policy)
                 pendingInteractionGateAction = null
             }
         )
@@ -1778,12 +1827,12 @@ private fun InteractionGateActionDialog(
     val scope = rememberCoroutineScope()
     AlertDialog(
         onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(if (action == InteractionGateAction.RELEASE) "结束本轮门禁" else "刷新本轮门禁") },
+        title = { Text(if (action == InteractionGateAction.RELEASE) "释放本轮门禁" else "刷新本轮门禁") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     if (action == InteractionGateAction.RELEASE) {
-                        "立即结束当前 AI Limbs 门禁限制；当前交互周期保持不变，本轮后续 AI 操作将直接放行，直到本轮 Interaction Cycle 自然结束或手动刷新门禁。"
+                        "立即释放当前 AI Limbs 门禁限制；当前交互周期保持不变，本轮后续 AI 操作将直接放行，直到本轮周期自然结束或手动刷新门禁。"
                     } else {
                         "立即刷新本轮 AI Limbs 门禁并开启新的交互周期，从现在重新计算周期时间。"
                     }
@@ -1813,7 +1862,7 @@ private fun InteractionGateActionDialog(
             }) {
                 Text(
                     if (busy) "处理中…"
-                    else if (action == InteractionGateAction.RELEASE) "确认结束"
+                    else if (action == InteractionGateAction.RELEASE) "确认释放"
                     else "确认刷新"
                 )
             }

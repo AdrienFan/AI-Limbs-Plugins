@@ -91,7 +91,7 @@ internal class PluginControlPlaneFacade(
             JSONObject().put("admin_password", password)
         )
         if (!result.optBoolean("authorized", false)) return null
-        check(result.optBoolean("gate_released", false)) { "基座未结束本轮 AI 门禁" }
+        check(result.optBoolean("gate_released", false)) { "基座未释放本轮 AI 门禁" }
         return parseInteractionCyclePolicy(result)
     }
 
@@ -580,7 +580,11 @@ private fun parseInteractionCyclePolicy(json: JSONObject) = InteractionCyclePoli
     timeoutMs = json.optLong("timeout_ms", 30L * 60L * 1000L),
     defaultTimeoutMs = json.optLong("default_timeout_ms", 30L * 60L * 1000L),
     configured = json.optBoolean("configured", false),
-    source = json.optString("source", "default")
+    source = json.optString("source", "default"),
+    generation = json.optLong("generation", 0L),
+    cycleStartedAtMs = json.optLong("cycle_started_at_ms", 0L),
+    expiredPending = json.optBoolean("expired_pending", false),
+    gateReleased = json.optBoolean("gate_released", false)
 )
 
 private fun parseResidentRuntime(json: JSONObject) = ResidentRuntimeSnapshot(

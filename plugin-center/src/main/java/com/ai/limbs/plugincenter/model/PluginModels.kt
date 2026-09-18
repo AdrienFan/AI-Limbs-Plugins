@@ -159,7 +159,11 @@ data class InteractionCyclePolicySnapshot(
     val timeoutMs: Long,
     val defaultTimeoutMs: Long,
     val configured: Boolean,
-    val source: String
+    val source: String,
+    val generation: Long = 0L,
+    val cycleStartedAtMs: Long = 0L,
+    val expiredPending: Boolean = false,
+    val gateReleased: Boolean = false
 )
 data class InteractionCycleResetResult(
     val policy: InteractionCyclePolicySnapshot,
