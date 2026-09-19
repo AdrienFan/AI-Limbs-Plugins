@@ -60,11 +60,11 @@ import com.ai.assistance.operit.plugins.system.SystemPluginUiRendererV2
 import com.ai.assistance.operit.plugins.system.SystemPluginUiSurfaceV2
 import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
 import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessSharedUiComponentIds
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
+import com.ai.limbs.plugincenter.runtime.PluginServiceBusClient
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import java.io.File
 import java.util.UUID
@@ -424,7 +424,18 @@ private fun ChildExtensionInstallerBlock(
     val scope = rememberCoroutineScope()
     val point = block.requiredText("point")
     val label = block.requiredText("label")
-    val hub = observedProvider(host, InProcessSystemIds.EXTENSION_HUB_PROVIDER)?.payload as? ExtensionHubService
+    var hubAvailable by remember(surface.ownerPluginId, point) { mutableStateOf(false) }
+    LaunchedEffect(host, surface.ownerPluginId, point) {
+        while (true) {
+            hubAvailable = PluginServiceBusClient.available(
+                host = host,
+                serviceId = InProcessSystemIds.EXTENSION_HUB_SERVICE,
+                minApi = 1,
+                expectedOwnerPluginId = "plugin.system.extension_hub"
+            )
+            delay(1_000L)
+        }
+    }
     var candidates by remember(surface.ownerPluginId, point) {
         mutableStateOf<List<ChildExtensionInstallCandidate>>(emptyList())
     }
@@ -462,12 +473,12 @@ private fun ChildExtensionInstallerBlock(
                 onClick = {
                     launcher.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                 },
-                enabled = hub != null && !busy
+                enabled = hubAvailable && !busy
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Text(" $label")
             }
-            if (hub == null) {
+            if (!hubAvailable) {
                 Text("Plugin Extension Hub 未启用", style = MaterialTheme.typography.bodySmall)
             } else if (candidates.isEmpty()) {
                 Text(
@@ -504,7 +515,7 @@ private fun ChildExtensionInstallerBlock(
                     Button(
                         enabled = !busy,
                         onClick = install@{
-                            val currentHub = hub ?: return@install
+                            if (!hubAvailable) return@install
                             val queue = candidates.toList()
                             if (queue.isEmpty()) return@install
                             scope.launch {
@@ -523,17 +534,21 @@ private fun ChildExtensionInstallerBlock(
                                                         requireNotNull(input) { "无法读取选择的子插件" }
                                                         temporary.outputStream().use(input::copyTo)
                                                     }
-                                                    currentHub.install(
-                                                        temporary,
-                                                        surface.ownerPluginId,
-                                                        point
+                                                    PluginServiceBusClient.call(
+                                                        host = host,
+                                                        serviceId = InProcessSystemIds.EXTENSION_HUB_SERVICE,
+                                                        operation = "install",
+                                                        parameters = JSONObject()
+                                                            .put("package_path", temporary.absolutePath)
+                                                            .put("expected_parent_plugin_id", surface.ownerPluginId)
+                                                            .put("expected_point", point)
                                                     )
                                                 } finally {
                                                     temporary.delete()
                                                 }
                                             }
                                         }.onSuccess { snapshot ->
-                                            messages += "已安装 ${snapshot.displayName} ${snapshot.version} · ${snapshot.lifecycle}"
+                                            messages += "已安装 ${snapshot.getString("display_name")} ${snapshot.getString("version")} · ${snapshot.getString("lifecycle")}"
                                             candidates = candidates.filterNot { it.uri == candidate.uri }
                                             childListExpandRequests.tryEmit(
                                                 childListKey(surface.ownerPluginId, point)

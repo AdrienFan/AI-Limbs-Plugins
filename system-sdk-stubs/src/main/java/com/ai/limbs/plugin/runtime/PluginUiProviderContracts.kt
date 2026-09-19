@@ -12,17 +12,20 @@ import kotlinx.coroutines.flow.StateFlow
  * supplies the canonical contracts. Keeping this module compile-only prevents a duplicate type
  * universe while still letting Plugin Center render providers without depending on Host internals.
  */
+/** Host UI-only provider marker. Business RPC uses the Service Bus. */
+interface InProcessUiProvider
+
 /**
  * Compile-only mirror of the Host's opaque UI state/event channel.
  *
  * Plugin Center, not Stable Kernel, defines the JSON component schema carried through this channel.
  */
-interface InProcessUiStateProvider {
+interface InProcessUiStateProvider : InProcessUiProvider {
     val stateJson: StateFlow<String?>
     suspend fun perform(eventId: String, payloadJson: String = "{}"): String
 }
 
-interface InProcessPageProvider {
+interface InProcessPageProvider : InProcessUiProvider {
     fun createView(context: Context, sharedUi: InProcessSharedUiHost): View
 }
 
@@ -97,19 +100,6 @@ data class ChildExtensionBackupSnapshot(
     val installedVersion: String? = null
 )
 
-/**
- * Compile-only view of the Extension Hub operations needed by Plugin Center's child-extension UI.
- * The complete runtime interface lives in AI Limbs; this mirror intentionally exposes no extra
- * authority beyond the methods the migrated renderer already used while it lived in Host.
- */
-interface ExtensionHubService {
-    suspend fun install(
-        packageFile: java.io.File,
-        expectedParentPluginId: String? = null,
-        expectedPoint: String? = null
-    ): ChildExtensionSnapshot
-}
-
 object InProcessSystemIds {
-    const val EXTENSION_HUB_PROVIDER = "system.extension.hub"
+    const val EXTENSION_HUB_SERVICE = "system.extension.hub"
 }

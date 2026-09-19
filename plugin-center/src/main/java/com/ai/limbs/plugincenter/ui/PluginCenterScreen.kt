@@ -115,6 +115,7 @@ private enum class PluginStatusLight(val filterId: String) {
 private sealed interface AdminAction {
     data object OpenSettings : AdminAction
     data class DisableSystem(val pluginId: String) : AdminAction
+    data class DisableChild(val child: ChildExtensionSummary) : AdminAction
     data class Uninstall(val pluginId: String) : AdminAction
     data class UninstallChild(val child: ChildExtensionSummary) : AdminAction
 }
@@ -154,7 +155,9 @@ fun PluginCenterScreen(
     var candidates by remember { mutableStateOf<List<PluginImportCandidate>>(emptyList()) }
     var updateTargetId by remember { mutableStateOf<String?>(null) }
     var selectedPluginId by remember { mutableStateOf<String?>(null) }
+    var selectedChildId by remember { mutableStateOf<String?>(null) }
     var disableSystemTargetId by remember { mutableStateOf<String?>(null) }
+    var disableChildTarget by remember { mutableStateOf<ChildExtensionSummary?>(null) }
     var uninstallTargetId by remember { mutableStateOf<String?>(null) }
     var uninstallChildTarget by remember { mutableStateOf<ChildExtensionSummary?>(null) }
     var childUpgradeTarget by remember { mutableStateOf<ChildExtensionSummary?>(null) }
@@ -194,6 +197,7 @@ fun PluginCenterScreen(
         when (action) {
             AdminAction.OpenSettings -> showAdminSettings = true
             is AdminAction.DisableSystem -> disableSystemTargetId = action.pluginId
+            is AdminAction.DisableChild -> disableChildTarget = action.child
             is AdminAction.Uninstall -> uninstallTargetId = action.pluginId
             is AdminAction.UninstallChild -> uninstallChildTarget = action.child
         }
@@ -202,6 +206,7 @@ fun PluginCenterScreen(
     fun actionRequiresFreshPassword(action: AdminAction): Boolean = when (action) {
         AdminAction.OpenSettings -> true
         is AdminAction.DisableSystem -> true
+        is AdminAction.DisableChild -> true
         is AdminAction.Uninstall -> {
             val target = snapshots.firstOrNull { it.plugin.pluginId == action.pluginId }
             target == null || isSystemPlugin(target)
@@ -407,16 +412,18 @@ fun PluginCenterScreen(
         showAdminSettings = false
         scope.launch { refresh() }
     }
-    BackHandler(enabled = !showAdminSettings && selectedPluginId != null) {
+    BackHandler(enabled = !showAdminSettings && (selectedPluginId != null || selectedChildId != null)) {
         selectedPluginId = null
+        selectedChildId = null
     }
-    BackHandler(enabled = !showAdminSettings && selectedPluginId == null) {
+    BackHandler(enabled = !showAdminSettings && selectedPluginId == null && selectedChildId == null) {
         onBack()
     }
 
     Scaffold(snackbarHost = { SnackbarHost(snackbarHostState) }) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             val selected = snapshots.firstOrNull { it.plugin.pluginId == selectedPluginId }
+            val selectedChild = childInventory.extensions.firstOrNull { it.extensionId == selectedChildId }
             if (showAdminSettings) {
                 PluginAdminSecurityScreen(
                     controlPlane = controlPlane,
@@ -447,9 +454,6 @@ fun PluginCenterScreen(
                         }
                     },
                     onUpdate = { choosePlugin(selected.plugin.pluginId) },
-                    onActivateVersion = { version ->
-                        runMutation { controlPlane.activateVersion(selected.plugin.pluginId, version) }
-                    },
                     onUninstall = {
                         if (selected.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
                             requestAdmin(AdminAction.Uninstall(selected.plugin.pluginId))
@@ -457,6 +461,26 @@ fun PluginCenterScreen(
                     },
                     onBackup = { runMutation { controlPlane.backup(selected.plugin.pluginId) } },
                     onRollback = { runMutation { controlPlane.rollback(selected.plugin.pluginId) } }
+                )
+            } else if (selectedChild != null) {
+                val parent = snapshots.firstOrNull { it.plugin.pluginId == selectedChild.parentPluginId }
+                ChildExtensionDetail(
+                    child = selectedChild,
+                    busy = busy,
+                    onlineUpgradeEnabled = parent?.let { childOnlineUpgradeAvailable(selectedChild, it) } == true,
+                    onBack = { selectedChildId = null },
+                    onOnlineUpgrade = {
+                        if (parent == null) {
+                            showError(IllegalStateException("找不到子插件所属插件：${selectedChild.parentPluginId}"))
+                        } else {
+                            runMutation { controlPlane.onlineUpgradeChild(selectedChild, parent) }
+                        }
+                    },
+                    onEnable = { runMutation { controlPlane.setChildExtensionEnabled(selectedChild.extensionId, true) } },
+                    onDisable = { requestAdmin(AdminAction.DisableChild(selectedChild)) },
+                    onUpdate = { chooseChildUpgrade(selectedChild) },
+                    onBackup = { runMutation { controlPlane.backupChildExtension(selectedChild.extensionId) } },
+                    onUninstall = { requestAdmin(AdminAction.UninstallChild(selectedChild)) }
                 )
             } else {
                 PluginCenterHome(
@@ -502,6 +526,7 @@ fun PluginCenterScreen(
                         }
                     },
                     onOpen = { selectedPluginId = it.plugin.pluginId },
+                    onOpenChild = { selectedChildId = it.extensionId },
                     onJump = ::jumpToPlugin,
                     onOnlineUpgrade = { snapshot -> runMutation { controlPlane.onlineUpgrade(snapshot) } },
                     onEnable = { snapshot -> runMutation { controlPlane.enable(snapshot.plugin.pluginId) } },
@@ -513,9 +538,6 @@ fun PluginCenterScreen(
                         }
                     },
                     onUpdate = { snapshot -> choosePlugin(snapshot.plugin.pluginId) },
-                    onActivateVersion = { snapshot, version ->
-                        runMutation { controlPlane.activateVersion(snapshot.plugin.pluginId, version) }
-                    },
                     onUninstall = { snapshot ->
                         if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
                             requestAdmin(AdminAction.Uninstall(snapshot.plugin.pluginId))
@@ -535,7 +557,7 @@ fun PluginCenterScreen(
                         runMutation { controlPlane.setChildExtensionEnabled(child.extensionId, true) }
                     },
                     onDisableChild = { child ->
-                        runMutation { controlPlane.setChildExtensionEnabled(child.extensionId, false) }
+                        requestAdmin(AdminAction.DisableChild(child))
                     },
                     onBackupChild = { child ->
                         runMutation { controlPlane.backupChildExtension(child.extensionId) }
@@ -596,6 +618,20 @@ fun PluginCenterScreen(
         )
     }
 
+    disableChildTarget?.let { child ->
+        AlertDialog(
+            onDismissRequest = { disableChildTarget = null },
+            title = { Text("禁用子插件") },
+            text = { Text("确定禁用 ${child.displayName}（${child.extensionId}）？禁用后相关能力会立即停止。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    disableChildTarget = null
+                    runMutation { controlPlane.setChildExtensionEnabled(child.extensionId, false) }
+                }) { Text("确认禁用") }
+            },
+            dismissButton = { TextButton(onClick = { disableChildTarget = null }) { Text("取消") } }
+        )
+    }
     uninstallChildTarget?.let { child ->
         AlertDialog(
             onDismissRequest = { uninstallChildTarget = null },
@@ -630,6 +666,7 @@ fun PluginCenterScreen(
             title = when (pendingAdminAction) {
                 AdminAction.OpenSettings -> "管理员验证"
                 is AdminAction.DisableSystem -> "验证后允许禁用系统插件"
+                is AdminAction.DisableChild -> "验证后允许禁用子插件"
                 is AdminAction.Uninstall -> "验证后允许卸载插件"
                 is AdminAction.UninstallChild -> "验证后允许卸载子插件"
                 null -> "管理员验证"
@@ -692,12 +729,12 @@ private fun PluginCenterHome(
     onClearCandidates: () -> Unit,
     onRemoveCandidate: (PluginImportCandidate) -> Unit,
     onOpen: (PluginControlSnapshot) -> Unit,
+    onOpenChild: (ChildExtensionSummary) -> Unit,
     onJump: (PluginControlSnapshot) -> Unit,
     onOnlineUpgrade: (PluginControlSnapshot) -> Unit,
     onEnable: (PluginControlSnapshot) -> Unit,
     onDisable: (PluginControlSnapshot) -> Unit,
     onUpdate: (PluginControlSnapshot) -> Unit,
-    onActivateVersion: (PluginControlSnapshot, String) -> Unit,
     onUninstall: (PluginControlSnapshot) -> Unit,
     onBackup: (PluginControlSnapshot) -> Unit,
     onOnlineUpgradeChild: (ChildExtensionSummary) -> Unit,
@@ -869,7 +906,6 @@ private fun PluginCenterHome(
                                 onEnable = { onEnable(snapshot) },
                                 onDisable = { onDisable(snapshot) },
                                 onUpdate = { onUpdate(snapshot) },
-                                onActivateVersion = { version -> onActivateVersion(snapshot, version) },
                                 onUninstall = { onUninstall(snapshot) },
                                 onBackup = { onBackup(snapshot) }
                             )
@@ -880,6 +916,7 @@ private fun PluginCenterHome(
                                         jumpEnabled = jumpHostAvailable && child.parentPluginId in jumpablePluginIds,
                                         onlineUpgradeEnabled = childOnlineUpgradeAvailable(child, snapshot),
                                         onJump = { onJumpChild(child) },
+                                        onOpen = { onOpenChild(child) },
                                         onOnlineUpgrade = { onOnlineUpgradeChild(child) },
                                         onUpgrade = { onUpgradeChild(child) },
                                         onEnable = { onEnableChild(child) },
@@ -946,7 +983,6 @@ private fun PluginCenterHome(
                                 onEnable = { onEnable(snapshot) },
                                 onDisable = { onDisable(snapshot) },
                                 onUpdate = { onUpdate(snapshot) },
-                                onActivateVersion = { version -> onActivateVersion(snapshot, version) },
                                 onUninstall = { onUninstall(snapshot) },
                                 onBackup = { onBackup(snapshot) }
                             )
@@ -957,6 +993,7 @@ private fun PluginCenterHome(
                                         jumpEnabled = jumpHostAvailable && child.parentPluginId in jumpablePluginIds,
                                         onlineUpgradeEnabled = childOnlineUpgradeAvailable(child, snapshot),
                                         onJump = { onJumpChild(child) },
+                                        onOpen = { onOpenChild(child) },
                                         onOnlineUpgrade = { onOnlineUpgradeChild(child) },
                                         onUpgrade = { onUpgradeChild(child) },
                                         onEnable = { onEnableChild(child) },
@@ -1091,7 +1128,6 @@ private fun PluginCard(
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onUpdate: () -> Unit,
-    onActivateVersion: (String) -> Unit,
     onUninstall: () -> Unit,
     onBackup: () -> Unit
 ) {
@@ -1178,11 +1214,6 @@ private fun PluginCard(
                     TextButton(onClick = onEnable) { Text("启用") }
                 }
                 TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
-                if (hasInactiveLatestVersion) {
-                    TextButton(onClick = { onActivateVersion(requireNotNull(latestInstalledVersion)) }) {
-                        Text("切换到 v$latestInstalledVersion")
-                    }
-                }
                 TextButton(onClick = onUpdate) { Text("本地更新") }
                 TextButton(onClick = onOnlineUpgrade, enabled = parentOnlineUpgradeAvailable(snapshot)) { Text("在线更新") }
                 if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
@@ -1293,6 +1324,7 @@ private fun ChildExtensionCard(
     jumpEnabled: Boolean,
     onlineUpgradeEnabled: Boolean,
     onJump: () -> Unit,
+    onOpen: () -> Unit,
     onOnlineUpgrade: () -> Unit,
     onUpgrade: () -> Unit,
     onEnable: () -> Unit,
@@ -1355,6 +1387,7 @@ private fun ChildExtensionCard(
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 TextButton(onClick = onJump, enabled = jumpEnabled) { Text("跳转") }
+                TextButton(onClick = onOpen) { Text("详情") }
                 if (child.enabled) {
                     TextButton(onClick = onDisable) { Text("禁用") }
                 } else {
@@ -1381,6 +1414,66 @@ private fun StatusDot(snapshot: PluginControlSnapshot) {
 }
 
 @Composable
+private fun ChildExtensionDetail(
+    child: ChildExtensionSummary,
+    busy: Boolean,
+    onlineUpgradeEnabled: Boolean,
+    onBack: () -> Unit,
+    onOnlineUpgrade: () -> Unit,
+    onEnable: () -> Unit,
+    onDisable: () -> Unit,
+    onUpdate: () -> Unit,
+    onBackup: () -> Unit,
+    onUninstall: () -> Unit
+) {
+    val statusColor = when {
+        !child.enabled || child.lifecycle == "DISABLED" -> Color(0xFF757575)
+        child.lifecycle == "ACTIVE" -> Color(0xFF00C853)
+        child.lifecycle == "FAILED" -> Color(0xFFD32F2F)
+        else -> Color(0xFFFFB300)
+    }
+    val canBackup = child.backupVersion != child.version
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        TextButton(onClick = onBack) { Text("← 插件管理") }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(modifier = Modifier.size(11.dp).background(statusColor, CircleShape))
+            Spacer(Modifier.size(10.dp))
+            Text(child.displayName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        }
+        child.description?.takeIf { it.isNotBlank() }?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        DetailLine("当前版本", child.version)
+        DetailLine("状态", child.lifecycle)
+        DetailLine("启用", if (child.enabled) "是" else "否")
+        child.lastError?.takeIf { it.isNotBlank() }?.let { DetailLine("状态说明", it) }
+        DetailLine("子插件 ID", child.extensionId)
+        DetailLine("所属插件", child.parentPluginId)
+        DetailLine("扩展点", child.point)
+        DetailLine("API", child.apiVersion.toString())
+        DetailLine("角色", if (child.roles.isEmpty()) "无" else child.roles.sorted().joinToString(", "))
+        DetailLine("使用次数", child.useCount.toString())
+        DetailLine("备份版本", child.backupVersion ?: "未备份")
+        Divider()
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            if (child.enabled) {
+                Button(onClick = onDisable, enabled = !busy) { Text("禁用") }
+            } else {
+                Button(onClick = onEnable, enabled = !busy) { Text("启用") }
+            }
+            OutlinedButton(onClick = onOnlineUpgrade, enabled = !busy && onlineUpgradeEnabled) { Text("在线更新") }
+            OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("本地更新") }
+            OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
+            DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
+        }
+    }
+}
+
+@Composable
 private fun PluginDetail(
     snapshot: PluginControlSnapshot,
     dependencySummary: PluginDependencySummary,
@@ -1390,7 +1483,6 @@ private fun PluginDetail(
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onUpdate: () -> Unit,
-    onActivateVersion: (String) -> Unit,
     onUninstall: () -> Unit,
     onBackup: () -> Unit,
     onRollback: () -> Unit
@@ -1399,7 +1491,6 @@ private fun PluginDetail(
     val state = snapshot.plugin.persistentState
     val currentVersion = state?.activeVersion
     val latestInstalledVersion = snapshot.plugin.versions.lastOrNull()
-    val hasInactiveLatestVersion = latestInstalledVersion != null && latestInstalledVersion != currentVersion
     val canBackup = currentVersion != null && snapshot.plugin.backup?.version != currentVersion
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -1465,12 +1556,6 @@ private fun PluginDetail(
         Text("版本管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         DetailLine("当前运行", currentVersion ?: "-")
         DetailLine("已安装最新版", latestInstalledVersion ?: "-")
-        if (hasInactiveLatestVersion) {
-            OutlinedButton(
-                onClick = { onActivateVersion(requireNotNull(latestInstalledVersion)) },
-                enabled = !busy
-            ) { Text("切换到 v$latestInstalledVersion") }
-        }
         DetailLine("上一版本", state?.previousVersion ?: "无")
         if (state?.previousVersion != null) {
             OutlinedButton(onClick = onRollback, enabled = !busy) { Text("回滚") }

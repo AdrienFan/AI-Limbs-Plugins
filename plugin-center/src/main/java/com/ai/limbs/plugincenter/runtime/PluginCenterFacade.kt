@@ -2,12 +2,14 @@ package com.ai.limbs.plugincenter.runtime
 
 import com.ai.assistance.operit.plugins.system.SystemJsonServiceV1
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugincenter.model.*
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.zip.ZipFile
 
@@ -124,14 +126,50 @@ internal class PluginControlPlaneFacade(
     private suspend fun snapshot(pluginId: String): PluginControlSnapshot =
         parseControlSnapshot(service.call("snapshot", JSONObject().put("plugin_id", pluginId)))
 
-    private fun extensionHubOrNull(): ExtensionHubService? {
-        val binding = host.providers.resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER)
-        if (binding?.ownerPluginId != "plugin.system.extension_hub") return null
-        return binding.payload as? ExtensionHubService
+    private suspend fun awaitPluginEnabled(pluginId: String, enabled: Boolean) {
+        val converged = withTimeoutOrNull(2_500L) {
+            while (snapshot(pluginId).plugin.persistentState?.enabled != enabled) {
+                delay(75L)
+            }
+            true
+        } ?: false
+        check(converged) { "插件状态同步超时：$pluginId -> ${if (enabled) "启用" else "禁用"}" }
     }
 
-    private fun requireExtensionHub(): ExtensionHubService =
-        extensionHubOrNull() ?: error("Plugin Extension Hub 未启用")
+    private suspend fun awaitChildExtensionEnabled(extensionId: String, enabled: Boolean) {
+        val converged = withTimeoutOrNull(2_500L) {
+            host.childExtensions.snapshots().first { snapshots ->
+                snapshots.firstOrNull { it.extensionId == extensionId }?.enabled == enabled
+            }
+            true
+        } ?: false
+        check(converged) { "子插件状态同步超时：$extensionId -> ${if (enabled) "启用" else "禁用"}" }
+    }
+
+    suspend fun extensionHubAvailable(): Boolean =
+        PluginServiceBusClient.available(
+            host = host,
+            serviceId = InProcessSystemIds.EXTENSION_HUB_SERVICE,
+            minApi = 1,
+            expectedOwnerPluginId = EXTENSION_HUB_PLUGIN_ID
+        )
+
+    suspend fun installChildExtension(
+        packageFile: File,
+        expectedParentPluginId: String?,
+        expectedPoint: String?
+    ): JSONObject {
+        require(packageFile.isFile) { "子插件安装包不存在：" + packageFile.path }
+        return PluginServiceBusClient.call(
+            host = host,
+            serviceId = InProcessSystemIds.EXTENSION_HUB_SERVICE,
+            operation = "install",
+            parameters = JSONObject()
+                .put("package_path", packageFile.absolutePath)
+                .put("expected_parent_plugin_id", expectedParentPluginId ?: "")
+                .put("expected_point", expectedPoint ?: "")
+        )
+    }
 
     fun childExtensionInventory(): ChildExtensionInventory {
         val backups = host.childExtensions.backupSnapshots().value.associateBy { it.extensionId }
@@ -158,7 +196,9 @@ internal class PluginControlPlaneFacade(
     }
 
     suspend fun setChildExtensionEnabled(extensionId: String, enabled: Boolean) {
-        host.childExtensions.setEnabled(extensionId, enabled)
+        val updated = host.childExtensions.setEnabled(extensionId, enabled)
+        check(updated.enabled == enabled) { "子插件状态未按请求更新：$extensionId" }
+        awaitChildExtensionEnabled(extensionId, enabled)
     }
 
     suspend fun backupChildExtension(extensionId: String) {
@@ -235,8 +275,8 @@ internal class PluginControlPlaneFacade(
         require(targetJson.optString("plugin_id") == target.parentPluginId) { "升级包所属插件目标不一致" }
         require(targetJson.optString("extension_point") == target.point) { "升级包扩展点不一致" }
         require(targetJson.optInt("api", -1) == target.apiVersion) { "升级包 API 版本不一致" }
-        val installed = requireExtensionHub().install(packageFile, target.parentPluginId, target.point)
-        check(installed.extensionId == target.extensionId) { "Hub 返回的子插件身份不一致" }
+        val installed = installChildExtension(packageFile, target.parentPluginId, target.point)
+        check(installed.getString("extension_id") == target.extensionId) { "Hub 返回的子插件身份不一致" }
     }
 
     suspend fun uninstallChildExtension(extensionId: String) {
@@ -278,12 +318,14 @@ internal class PluginControlPlaneFacade(
     }
     suspend fun enable(pluginId: String) {
         service.call("enable", JSONObject().put("plugin_id", pluginId))
+        awaitPluginEnabled(pluginId, true)
     }
 
     suspend fun disable(pluginId: String, adminAuthorized: Boolean = false) {
         service.call("disable", JSONObject()
             .put("plugin_id", pluginId)
             .put("admin_authorized", adminAuthorized))
+        awaitPluginEnabled(pluginId, false)
     }
 
     suspend fun activateVersion(pluginId: String, version: String) {
