@@ -1503,9 +1503,9 @@ private fun PluginDetail(
         DetailLine("被插件依赖", dependencySummary.parentPluginCount.toString() + " 个"); DetailLine("被子插件依赖", dependencySummary.childPluginCount?.let { it.toString() + " 个" } ?: "不可用")
         DetailLine("备份版本", snapshot.plugin.backup?.version ?: "未备份"); Divider()
         Text("权限", fontWeight = FontWeight.Bold)
-        val scopes = manifest?.permissions?.requestedScopes.orEmpty(); Text(if (scopes.isEmpty()) "未声明权限" else scopes.joinToString("\n"))
-        Text("提供的能力", fontWeight = FontWeight.Bold); val capabilities = manifest?.provides?.capabilities.orEmpty(); Text(if (capabilities.isEmpty()) "无" else capabilities.joinToString("\n"))
-        Text("提供的界面扩展", fontWeight = FontWeight.Bold); val extensions = manifest?.provides?.extensions.orEmpty(); Text(if (extensions.isEmpty()) "无" else extensions.joinToString("\n") { it.point + " / " + it.id })
+        val scopes = manifest?.permissions?.requestedScopes.orEmpty(); Text(if (scopes.isEmpty()) "未声明权限" else scopes.joinToString("\\n"))
+        Text("提供的能力", fontWeight = FontWeight.Bold); val capabilities = manifest?.provides?.capabilities.orEmpty(); Text(if (capabilities.isEmpty()) "无" else capabilities.joinToString("\\n"))
+        Text("提供的界面扩展", fontWeight = FontWeight.Bold); val extensions = manifest?.provides?.extensions.orEmpty(); Text(if (extensions.isEmpty()) "无" else extensions.joinToString("\\n") { it.point + " / " + it.id })
         Text("依赖", fontWeight = FontWeight.Bold); val pluginDeps = manifest?.dependencies?.plugins.orEmpty(); val serviceDeps = manifest?.dependencies?.services.orEmpty()
         if (pluginDeps.isEmpty() && serviceDeps.isEmpty()) Text("无") else { pluginDeps.forEach { Text("插件：" + it.pluginId + (it.minVersion?.let { v -> " >= " + v } ?: "")) }; serviceDeps.forEach { Text("服务：" + it.serviceId + (it.minApi?.let { api -> " API >= " + api } ?: "")) } }
         Divider()
