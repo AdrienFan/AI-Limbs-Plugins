@@ -60,6 +60,8 @@ data class PluginPersistentState(
     val pluginId: String,
     val activeVersion: String?,
     val previousVersion: String?,
+    val rollbackVersion: String?,
+    val retentionLimit: Int,
     val enabled: Boolean,
     val lastState: PluginLifecycleState,
     val lastError: String?,
@@ -88,7 +90,10 @@ data class ChildExtensionSummary(
     val roles: Set<String> = emptySet(),
     val useCount: Long,
     val lastError: String?,
-    val backupVersion: String?
+    val backupVersion: String?,
+    val versions: List<String> = listOf(version),
+    val rollbackVersion: String? = null,
+    val retentionLimit: Int = 3
 )
 data class ChildExtensionInventory(
     val available: Boolean,

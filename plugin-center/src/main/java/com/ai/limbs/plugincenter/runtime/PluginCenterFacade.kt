@@ -189,7 +189,10 @@ internal class PluginControlPlaneFacade(
                     roles = child.roles,
                     useCount = child.useCount,
                     lastError = child.lastError,
-                    backupVersion = backups[child.extensionId]?.version
+                    backupVersion = backups[child.extensionId]?.version,
+                    versions = host.childExtensions.versions(child.extensionId),
+                    rollbackVersion = host.childExtensions.immediateRollbackVersion(child.extensionId),
+                    retentionLimit = host.childExtensions.retentionLimit(child.extensionId)
                 )
             }
         )
@@ -214,6 +217,18 @@ internal class PluginControlPlaneFacade(
 
     suspend fun deleteChildBackup(extensionId: String) {
         check(host.childExtensions.deleteBackup(extensionId)) { "子插件备份不存在：$extensionId" }
+    }
+    suspend fun activateChildVersion(extensionId: String, version: String) {
+        host.childExtensions.activateVersion(extensionId, version)
+    }
+    suspend fun rollbackChildVersion(extensionId: String) {
+        host.childExtensions.immediateRollback(extensionId)
+    }
+    suspend fun deleteChildVersion(extensionId: String, version: String) {
+        check(host.childExtensions.deleteVersion(extensionId, version)) { "子插件版本不存在：" + extensionId + " " + version }
+    }
+    suspend fun configureChildVersionRetention(extensionId: String, limit: Int) {
+        host.childExtensions.setVersionRetention(extensionId, limit)
     }
 
     suspend fun exportChildBackups(extensionIds: Collection<String>, treeUri: String): List<String> {
@@ -336,6 +351,12 @@ internal class PluginControlPlaneFacade(
 
     suspend fun rollback(pluginId: String) {
         service.call("rollback", JSONObject().put("plugin_id", pluginId))
+    }
+    suspend fun configureVersionRetention(pluginId: String, limit: Int) {
+        service.call("configure_version_retention", JSONObject().put("plugin_id", pluginId).put("limit", limit))
+    }
+    suspend fun deleteVersion(pluginId: String, version: String) {
+        service.call("delete_version", JSONObject().put("plugin_id", pluginId).put("version", version))
     }
 
     suspend fun uninstall(pluginId: String, removeData: Boolean = false, adminAuthorized: Boolean = false) {
@@ -682,6 +703,8 @@ private fun parsePersistentState(json: JSONObject) = PluginPersistentState(
     pluginId = json.getString("plugin_id"),
     activeVersion = json.optNullableString("active_version"),
     previousVersion = json.optNullableString("previous_version"),
+    rollbackVersion = json.optNullableString("rollback_version") ?: json.optNullableString("previous_version"),
+    retentionLimit = json.optInt("retention_limit", 3),
     enabled = json.optBoolean("enabled"),
     lastState = PluginLifecycleState.valueOf(json.optString("last_state", "INSTALLED")),
     lastError = json.optNullableString("last_error"),

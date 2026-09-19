@@ -208,6 +208,13 @@ interface SystemPluginChildExtensionControlV2 {
     suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot
     suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot
     suspend fun deleteBackup(extensionId: String): Boolean
+    fun versions(extensionId: String): List<String>
+    fun retentionLimit(extensionId: String): Int
+    fun immediateRollbackVersion(extensionId: String): String?
+    suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot
+    suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot
+    suspend fun deleteVersion(extensionId: String, version: String): Boolean
+    suspend fun setVersionRetention(extensionId: String, limit: Int)
     suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long = 10L)
     suspend fun exportBackups(extensionIds: Collection<String>, treeUri: String): List<String>
     fun snapshots(): StateFlow<List<ChildExtensionSnapshot>>
