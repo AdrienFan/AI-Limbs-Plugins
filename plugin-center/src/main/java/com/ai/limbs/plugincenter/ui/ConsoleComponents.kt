@@ -35,7 +35,7 @@ internal fun ConsoleOverview(total: Int, running: Int, attention: Int, failed: I
         verticalArrangement = Arrangement.spacedBy(8.dp)) {
         ConsoleStat("插件", total)
         ConsoleStat("运行", running)
-        ConsoleStat("关注", attention)
+        ConsoleStat("未就绪", attention)
         ConsoleStat("故障", failed, error = failed > 0)
         ConsoleStat("停用", disabled)
     }

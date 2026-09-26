@@ -792,7 +792,7 @@ private fun PluginCenterHome(
     val statusFilterOptions = remember {
         listOf(
             PluginStatusFilterOption(PluginStatusLight.RED.filterId, "🔴 红灯 · 故障"),
-            PluginStatusFilterOption(PluginStatusLight.YELLOW.filterId, "🟡 黄灯 · 注意 / 过渡状态"),
+            PluginStatusFilterOption(PluginStatusLight.YELLOW.filterId, "🟡 黄灯 · 未就绪"),
             PluginStatusFilterOption(PluginStatusLight.GREEN.filterId, "🟢 绿灯 · 正常运行"),
             PluginStatusFilterOption(PluginStatusLight.GRAY.filterId, "⚪ 灰灯 · 已禁用")
         )
@@ -1208,7 +1208,7 @@ private fun PluginCard(
             Text(
                 "v${currentVersion ?: "-"} · ${when (pluginStatusLight(snapshot)) {
                     PluginStatusLight.GREEN -> "正常运行"
-                    PluginStatusLight.YELLOW -> "需要关注"
+                    PluginStatusLight.YELLOW -> "未就绪"
                     PluginStatusLight.RED -> "运行故障"
                     PluginStatusLight.GRAY -> "已停用"
                 }}",
@@ -1380,7 +1380,7 @@ private fun ChildExtensionCard(
                             !child.enabled || child.lifecycle == "DISABLED" -> "已停用"
                             child.lifecycle == "ACTIVE" -> "正常运行"
                             child.lifecycle == "FAILED" -> "运行故障"
-                            else -> "需要关注"
+                            else -> "未就绪"
                         }}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1471,7 +1471,7 @@ private fun ChildExtensionDetail(
             OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
             DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
         }
-        VersionManager(child.version, child.versions, child.rollbackVersion, child.retentionLimit, busy, onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
+        VersionManager(child.version, null, child.versions, child.rollbackVersion, child.retentionLimit, busy, onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
     }
 }
 @OptIn(ExperimentalLayoutApi::class)
@@ -1501,7 +1501,7 @@ private fun PluginDetail(
         TextButton(onClick = onBack) { Text("← 插件管理") }
         Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(snapshot); Spacer(Modifier.size(10.dp)); Text(manifest?.display?.name ?: snapshot.plugin.pluginId, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
         manifest?.display?.description?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        DetailLine("当前运行版本", currentVersion ?: "-"); DetailLine("已安装最新版", latestInstalledVersion ?: "-"); DetailLine("状态", state?.lastState?.name ?: "-")
+        DetailLine("已激活版本", currentVersion ?: "-"); DetailLine("已安装最新版", latestInstalledVersion ?: "-"); DetailLine("状态", state?.lastState?.name ?: "-")
         state?.lastError?.takeIf { it.isNotBlank() }?.let { DetailLine("状态说明", it) }
         DetailLine("运行时", manifest?.runtime?.kind ?: "-"); DetailLine("激活模式", manifest?.activationMode?.wireName ?: "-")
         DetailLine("安装位置", "AI Limbs Plugin Store"); DetailLine("插件 ID", snapshot.plugin.pluginId); DetailLine("已挂载版本", snapshot.plugin.mountedVersion ?: "未挂载")
@@ -1522,12 +1522,12 @@ private fun PluginDetail(
             if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
             OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
         }
-        VersionManager(currentVersion, snapshot.plugin.versions, state?.rollbackVersion, state?.retentionLimit ?: 3, busy, onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
+        VersionManager(currentVersion, snapshot.plugin.mountedVersion, snapshot.plugin.versions, state?.rollbackVersion, state?.retentionLimit ?: 3, busy, onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
     }
 }
 @Composable
 private fun VersionManager(
-    currentVersion: String?, versions: List<String>, rollbackVersion: String?, retentionLimit: Int, busy: Boolean,
+    currentVersion: String?, mountedVersion: String?, versions: List<String>, rollbackVersion: String?, retentionLimit: Int, busy: Boolean,
     onActivateVersion: (String) -> Unit, onDeleteVersion: (String) -> Unit, onRollback: () -> Unit, onConfigureRetention: (Int) -> Unit
 ) {
     Text("版本管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -1535,17 +1535,20 @@ private fun VersionManager(
     var selectedVersion by remember(versions, currentVersion) { mutableStateOf(currentVersion ?: versions.lastOrNull().orEmpty()) }
     var showCustomRetention by remember { mutableStateOf(false) }; var customRetention by remember { mutableStateOf("") }
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("当前运行", modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant); Text(currentVersion ?: "-", modifier = Modifier.weight(0.25f))
+        Text("已激活", modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant); Text(currentVersion ?: "-", modifier = Modifier.weight(0.25f))
         Box(modifier = Modifier.weight(0.40f)) {
             OutlinedButton(onClick = { versionMenuExpanded = true }, enabled = !busy && versions.isNotEmpty()) { Text(if (selectedVersion.isBlank()) "选择版本" else selectedVersion + " ▼") }
             DropdownMenu(expanded = versionMenuExpanded, onDismissRequest = { versionMenuExpanded = false }) {
-                versions.asReversed().forEach { version -> DropdownMenuItem(text = { Text(version + if (version == currentVersion) " · 当前" else "") }, onClick = { selectedVersion = version; versionMenuExpanded = false }) }
+                versions.asReversed().forEach { version -> DropdownMenuItem(text = { Text(version + when { version == currentVersion -> " · 已激活"; version == mountedVersion -> " · 运行中"; else -> "" }) }, onClick = { selectedVersion = version; versionMenuExpanded = false }) }
             }
         }
     }
+    if (mountedVersion != null && mountedVersion != currentVersion) {
+        DetailLine("仍在运行", mountedVersion)
+    }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedButton(onClick = { onActivateVersion(selectedVersion) }, enabled = !busy && selectedVersion.isNotBlank() && selectedVersion != currentVersion) { Text("切换") }
-        OutlinedButton(onClick = { onDeleteVersion(selectedVersion) }, enabled = !busy && selectedVersion.isNotBlank() && selectedVersion != currentVersion && selectedVersion != rollbackVersion) { Text("删除") }
+        OutlinedButton(onClick = { onDeleteVersion(selectedVersion) }, enabled = !busy && selectedVersion.isNotBlank() && selectedVersion != currentVersion && selectedVersion != mountedVersion && selectedVersion in versions) { Text("删除") }
     }
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text("自动保留版本", modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant)
