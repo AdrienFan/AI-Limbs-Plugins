@@ -22,6 +22,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
@@ -585,10 +587,7 @@ internal fun PluginAdminSecurityScreen(
         .map { it.extensionId }
     val allFilteredChildBackupsSelected = filteredChildBackups.isNotEmpty() &&
         filteredChildBackups.all { it.extensionId in selectedChildBackupIds }
-    val childBackupGroups = remember(filteredChildBackups, pluginDisplayNames) {
-        filteredChildBackups.groupBy { it.target.parentPluginId }.entries
-            .sortedBy { pluginDisplayNames[it.key] ?: it.key }
-    }
+    // Child backups share one horizontal strip, regardless of parent plugin.
 
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     Column(
@@ -604,10 +603,10 @@ internal fun PluginAdminSecurityScreen(
         Text("安全、运行维护与开发设置", style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         ConsoleSectionHeading("安全与访问", "管理凭据、验证频率与本轮交互门禁")
-        ConsoleAdaptiveGroup {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ConsolePanel(modifier = Modifier.weight(1f)) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text("管理员凭据", fontWeight = FontWeight.Bold)
@@ -626,7 +625,7 @@ internal fun PluginAdminSecurityScreen(
             }
             ConsolePanel(modifier = Modifier.weight(1f)) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Text("AI Limbs 门禁策略", fontWeight = FontWeight.Bold)
@@ -1159,13 +1158,13 @@ internal fun PluginAdminSecurityScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 } else {
-                    ConsoleAdaptiveGroup {
-                        filteredBackups.forEach { backup ->
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(end = 8.dp)) {
+                        items(filteredBackups, key = { it.pluginId }) { backup ->
                             BackupPluginCard(
                                 backup = backup,
                                 selected = backup.pluginId in selectedBackupIds,
                                 busy = busy,
-                                modifier = Modifier.weight(1f),
+                                modifier = Modifier.width(260.dp),
                                 onSelectedChange = { selected ->
                                     selectedBackupIds = if (selected) selectedBackupIds + backup.pluginId
                                         else selectedBackupIds - backup.pluginId
@@ -1228,29 +1227,24 @@ internal fun PluginAdminSecurityScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 } else {
-                    childBackupGroups.forEach { entry ->
-                        val pluginId = entry.key
-                        ChildBackupPluginGroup(
-                            pluginName = pluginDisplayNames[pluginId] ?: pluginId,
-                            pluginId = pluginId,
-                            pluginInstalled = pluginId in installedPluginIds,
-                            backups = entry.value,
-                            selectedIds = selectedChildBackupIds,
-                            busy = busy,
-                            onSelectedChange = { extensionId, selected ->
-                                selectedChildBackupIds = if (selected) {
-                                    selectedChildBackupIds + extensionId
-                                } else {
-                                    selectedChildBackupIds - extensionId
-                                }
-                            },
-                            onRestore = { extensionId ->
-                                runAdminMutation { controlPlane.restoreChildBackup(extensionId) }
-                            },
-                            onDelete = { extensionId ->
-                                runAdminMutation { controlPlane.deleteChildBackup(extensionId) }
-                            }
-                        )
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(end = 8.dp)) {
+                        items(filteredChildBackups, key = { it.extensionId }) { backup ->
+                            val pluginId = backup.target.parentPluginId
+                            BackupChildExtensionCard(
+                                backup = backup,
+                                parentName = pluginDisplayNames[pluginId] ?: pluginId,
+                                parentInstalled = pluginId in installedPluginIds,
+                                selected = backup.extensionId in selectedChildBackupIds,
+                                busy = busy,
+                                modifier = Modifier.width(260.dp),
+                                onSelectedChange = { selected ->
+                                    selectedChildBackupIds = if (selected) selectedChildBackupIds + backup.extensionId
+                                        else selectedChildBackupIds - backup.extensionId
+                                },
+                                onRestore = { runAdminMutation { controlPlane.restoreChildBackup(backup.extensionId) } },
+                                onDelete = { runAdminMutation { controlPlane.deleteChildBackup(backup.extensionId) } }
+                            )
+                        }
                     }
                 }
             }
@@ -1458,50 +1452,10 @@ private fun BackupPluginCard(
 }
 
 @Composable
-private fun ChildBackupPluginGroup(
-    pluginName: String,
-    pluginId: String,
-    pluginInstalled: Boolean,
-    backups: List<ChildExtensionBackupSnapshot>,
-    selectedIds: Set<String>,
-    busy: Boolean,
-    onSelectedChange: (String, Boolean) -> Unit,
-    onRestore: (String) -> Unit,
-    onDelete: (String) -> Unit
-) {
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(pluginName, fontWeight = FontWeight.Bold)
-                Text(pluginId, style = MaterialTheme.typography.bodySmall)
-            }
-            Text("子插件备份 ${backups.size} 个", style = MaterialTheme.typography.bodySmall)
-        }
-        if (!pluginInstalled) {
-            Text(
-                "插件当前未安装；备份仍保留，恢复时会重新校验所属插件与扩展点。",
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        ConsoleAdaptiveGroup {
-            backups.forEach { backup ->
-                BackupChildExtensionCard(
-                    backup = backup,
-                    selected = backup.extensionId in selectedIds,
-                    busy = busy,
-                    modifier = Modifier.weight(1f),
-                    onSelectedChange = { selected -> onSelectedChange(backup.extensionId, selected) },
-                    onRestore = { onRestore(backup.extensionId) },
-                    onDelete = { onDelete(backup.extensionId) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun BackupChildExtensionCard(
     backup: ChildExtensionBackupSnapshot,
+    parentName: String,
+    parentInstalled: Boolean,
     selected: Boolean,
     busy: Boolean,
     modifier: Modifier = Modifier,
@@ -1515,11 +1469,13 @@ private fun BackupChildExtensionCard(
                 Checkbox(checked = selected, enabled = !busy, onCheckedChange = onSelectedChange)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(backup.displayName, fontWeight = FontWeight.Bold)
+                    Text("所属插件：$parentName", style = MaterialTheme.typography.bodySmall)
                     Text("v${backup.version} · .ailx", style = MaterialTheme.typography.bodySmall)
                     Text(backup.extensionId, style = MaterialTheme.typography.bodySmall)
                 }
             }
             Text("备份时间：${formatBackupTime(backup.backedUpAtEpochMs)}", style = MaterialTheme.typography.bodySmall)
+            if (!parentInstalled) Text("所属插件未安装；恢复时会重新校验扩展点。", style = MaterialTheme.typography.bodySmall)
             Text(
                 if (backup.installed) {
                     "当前已安装：v${backup.installedVersion ?: "未知"}"
