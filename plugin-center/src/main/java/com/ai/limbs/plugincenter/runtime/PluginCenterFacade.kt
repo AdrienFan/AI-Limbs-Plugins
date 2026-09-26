@@ -294,8 +294,12 @@ internal class PluginControlPlaneFacade(
         check(installed.getString("extension_id") == target.extensionId) { "Hub 返回的子插件身份不一致" }
     }
 
-    suspend fun uninstallChildExtension(extensionId: String) {
-        check(host.childExtensions.uninstall(extensionId)) { "子插件不存在：$extensionId" }
+    suspend fun uninstallChildExtension(extensionId: String, removeData: Boolean = false) {
+        val result = service.call(
+            "uninstall_child",
+            JSONObject().put("extension_id", extensionId).put("remove_data", removeData)
+        )
+        check(result.getBoolean("removed")) { "子插件不存在：$extensionId" }
     }
 
     suspend fun inspectUri(uri: String): PluginImportCandidate {

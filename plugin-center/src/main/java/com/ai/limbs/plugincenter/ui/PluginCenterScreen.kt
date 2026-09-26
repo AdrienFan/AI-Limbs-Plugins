@@ -8,6 +8,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -607,26 +609,21 @@ fun PluginCenterScreen(
     }
 
     uninstallTargetId?.let { pluginId ->
-        AlertDialog(
-            onDismissRequest = { uninstallTargetId = null },
-            title = { Text("卸载插件") },
-            text = { Text("确定卸载 $pluginId？插件长期数据默认保留。") },
-            confirmButton = {
-                DangerTextButton(onClick = {
-                    uninstallTargetId = null
-                    if (selectedPluginId == pluginId) selectedPluginId = null
-                    val systemPlugin = snapshots.firstOrNull { it.plugin.pluginId == pluginId }
-                        ?.let(::isSystemPlugin) == true
-                    runMutation {
-                        controlPlane.uninstall(
-                            pluginId,
-                            removeData = false,
-                            adminAuthorized = systemPlugin
-                        )
+        UninstallConfirmationDialog(
+            title = "卸载插件",
+            displayName = pluginId,
+            onDismiss = { uninstallTargetId = null },
+            onConfirm = { removeData ->
+                uninstallTargetId = null
+                val systemPlugin = snapshots.firstOrNull { it.plugin.pluginId == pluginId }
+                    ?.let(::isSystemPlugin) == true
+                runMutation {
+                    controlPlane.uninstall(pluginId, removeData = removeData, adminAuthorized = systemPlugin)
+                    withContext(Dispatchers.Main) {
+                        if (selectedPluginId == pluginId) selectedPluginId = null
                     }
-                }) { Text("卸载") }
-            },
-            dismissButton = { TextButton(onClick = { uninstallTargetId = null }) { Text("取消") } }
+                }
+            }
         )
     }
 
@@ -645,17 +642,19 @@ fun PluginCenterScreen(
         )
     }
     uninstallChildTarget?.let { child ->
-        AlertDialog(
-            onDismissRequest = { uninstallChildTarget = null },
-            title = { Text("卸载子插件") },
-            text = { Text("确定卸载 ${child.displayName}（${child.extensionId}）？子插件长期数据默认保留。") },
-            confirmButton = {
-                DangerTextButton(onClick = {
-                    uninstallChildTarget = null
-                    runMutation { controlPlane.uninstallChildExtension(child.extensionId) }
-                }) { Text("卸载") }
-            },
-            dismissButton = { TextButton(onClick = { uninstallChildTarget = null }) { Text("取消") } }
+        UninstallConfirmationDialog(
+            title = "卸载子插件",
+            displayName = "${child.displayName}（${child.extensionId}）",
+            onDismiss = { uninstallChildTarget = null },
+            onConfirm = { removeData ->
+                uninstallChildTarget = null
+                runMutation {
+                    controlPlane.uninstallChildExtension(child.extensionId, removeData)
+                    withContext(Dispatchers.Main) {
+                        if (selectedChildId == child.extensionId) selectedChildId = null
+                    }
+                }
+            }
         )
     }
 
@@ -1452,28 +1451,51 @@ private fun ChildExtensionDetail(
         else -> Color(0xFFFFB300)
     }
     val canBackup = child.backupVersion != child.version
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TextButton(onClick = onBack) { Text("← 插件管理") }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(11.dp).background(statusColor, CircleShape)); Spacer(Modifier.size(10.dp))
-            Text(child.displayName, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+    ConsoleDetailPage("子插件详情", onBack) {
+        ConsoleSection("概览") {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Box(Modifier.size(11.dp).background(statusColor, CircleShape))
+                Text(child.displayName, modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            }
+            child.description?.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            DetailLine("当前版本", child.version)
+            DetailLine("运行状态", child.lifecycle)
+            DetailLine("启用状态", if (child.enabled) "已启用" else "已禁用")
+            child.lastError?.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
         }
-        child.description?.takeIf { it.isNotBlank() }?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        DetailLine("当前版本", child.version); DetailLine("状态", child.lifecycle); DetailLine("启用", if (child.enabled) "是" else "否")
-        child.lastError?.takeIf { it.isNotBlank() }?.let { DetailLine("状态说明", it) }
-        DetailLine("子插件 ID", child.extensionId); DetailLine("所属插件", child.parentPluginId); DetailLine("扩展点", child.point)
-        DetailLine("API", child.apiVersion.toString()); DetailLine("角色", if (child.roles.isEmpty()) "无" else child.roles.sorted().joinToString(", "))
-        DetailLine("使用次数", child.useCount.toString()); DetailLine("备份版本", child.backupVersion ?: "未备份"); Divider()
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (child.enabled) Button(onClick = onDisable, enabled = !busy) { Text("禁用") } else Button(onClick = onEnable, enabled = !busy) { Text("启用") }
-            OutlinedButton(onClick = onOnlineUpgrade, enabled = !busy && onlineUpgradeEnabled) { Text("在线更新") }
-            OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("本地更新") }
-            OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
-            DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
+        ConsoleSection("常用操作") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (child.enabled) Button(onClick = onDisable, enabled = !busy) { Text("禁用") }
+                else Button(onClick = onEnable, enabled = !busy) { Text("启用") }
+                OutlinedButton(onClick = onOnlineUpgrade, enabled = !busy && onlineUpgradeEnabled) { Text("在线更新") }
+                OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("本地更新") }
+                OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
+            }
+            DetailLine("备份版本", child.backupVersion ?: "未备份")
         }
-        VersionManager(child.version, null, child.versions, child.rollbackVersion, child.retentionLimit, busy, onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
+        VersionManager(child.version, null, child.versions, child.rollbackVersion, child.retentionLimit, busy,
+            onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
+        ConsoleSection("身份与扩展点") {
+            DetailLine("子插件 ID", child.extensionId)
+            DetailLine("所属插件", child.parentPluginId)
+            DetailLine("扩展点", child.point)
+            DetailLine("API 版本", child.apiVersion.toString())
+            DetailLine("角色", if (child.roles.isEmpty()) "无" else child.roles.sorted().joinToString(", "))
+            DetailLine("使用次数", child.useCount.toString())
+        }
+        ConsoleSection("卸载") {
+            Text("卸载时可选择保留或清除托管数据。", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载子插件") }
+        }
     }
 }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PluginDetail(
@@ -1497,81 +1519,179 @@ private fun PluginDetail(
     val currentVersion = state?.activeVersion
     val latestInstalledVersion = snapshot.plugin.versions.lastOrNull()
     val canBackup = currentVersion != null && snapshot.plugin.backup?.version != currentVersion
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        TextButton(onClick = onBack) { Text("← 插件管理") }
-        Row(verticalAlignment = Alignment.CenterVertically) { StatusDot(snapshot); Spacer(Modifier.size(10.dp)); Text(manifest?.display?.name ?: snapshot.plugin.pluginId, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
-        manifest?.display?.description?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        DetailLine("已激活版本", currentVersion ?: "-"); DetailLine("已安装最新版", latestInstalledVersion ?: "-"); DetailLine("状态", state?.lastState?.name ?: "-")
-        state?.lastError?.takeIf { it.isNotBlank() }?.let { DetailLine("状态说明", it) }
-        DetailLine("运行时", manifest?.runtime?.kind ?: "-"); DetailLine("激活模式", manifest?.activationMode?.wireName ?: "-")
-        DetailLine("安装位置", "AI Limbs Plugin Store"); DetailLine("插件 ID", snapshot.plugin.pluginId); DetailLine("已挂载版本", snapshot.plugin.mountedVersion ?: "未挂载")
-        DetailLine("使用次数", snapshot.plugin.usage.useCount.toString()); DetailLine("最近使用", usageSummary(snapshot).substringAfter("最近使用："))
-        DetailLine("被插件依赖", dependencySummary.parentPluginCount.toString() + " 个"); DetailLine("被子插件依赖", dependencySummary.childPluginCount?.let { it.toString() + " 个" } ?: "不可用")
-        DetailLine("备份版本", snapshot.plugin.backup?.version ?: "未备份"); Divider()
-        Text("权限", fontWeight = FontWeight.Bold)
-        val scopes = manifest?.permissions?.requestedScopes.orEmpty(); Text(if (scopes.isEmpty()) "未声明权限" else scopes.joinToString("\\n"))
-        Text("提供的能力", fontWeight = FontWeight.Bold); val capabilities = manifest?.provides?.capabilities.orEmpty(); Text(if (capabilities.isEmpty()) "无" else capabilities.joinToString("\\n"))
-        Text("提供的界面扩展", fontWeight = FontWeight.Bold); val extensions = manifest?.provides?.extensions.orEmpty(); Text(if (extensions.isEmpty()) "无" else extensions.joinToString("\\n") { it.point + " / " + it.id })
-        Text("依赖", fontWeight = FontWeight.Bold); val pluginDeps = manifest?.dependencies?.plugins.orEmpty(); val serviceDeps = manifest?.dependencies?.services.orEmpty()
-        if (pluginDeps.isEmpty() && serviceDeps.isEmpty()) Text("无") else { pluginDeps.forEach { Text("插件：" + it.pluginId + (it.minVersion?.let { v -> " >= " + v } ?: "")) }; serviceDeps.forEach { Text("服务：" + it.serviceId + (it.minApi?.let { api -> " API >= " + api } ?: "")) } }
-        Divider()
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (state?.enabled == true) Button(onClick = onDisable, enabled = !busy) { Text("禁用") } else Button(onClick = onEnable, enabled = !busy) { Text("启用") }
-            OutlinedButton(onClick = onOnlineUpgrade, enabled = !busy && parentOnlineUpgradeAvailable(snapshot)) { Text("在线更新") }
-            OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("本地更新") }
-            if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
-            OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
+    ConsoleDetailPage("插件详情", onBack) {
+        ConsoleSection("概览") {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                StatusDot(snapshot)
+                Text(manifest?.display?.name ?: snapshot.plugin.pluginId, modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            }
+            manifest?.display?.description?.let { Text(it, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            DetailLine("已激活版本", currentVersion ?: "-")
+            DetailLine("已安装最新版", latestInstalledVersion ?: "-")
+            DetailLine("已挂载版本", snapshot.plugin.mountedVersion ?: "未挂载")
+            DetailLine("运行状态", state?.lastState?.name ?: "-")
+            state?.lastError?.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            }
         }
-        VersionManager(currentVersion, snapshot.plugin.mountedVersion, snapshot.plugin.versions, state?.rollbackVersion, state?.retentionLimit ?: 3, busy, onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
+        ConsoleSection("常用操作") {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (state?.enabled == true) Button(onClick = onDisable, enabled = !busy) { Text("禁用") }
+                else Button(onClick = onEnable, enabled = !busy) { Text("启用") }
+                OutlinedButton(onClick = onOnlineUpgrade, enabled = !busy && parentOnlineUpgradeAvailable(snapshot)) { Text("在线更新") }
+                OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("本地更新") }
+                OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
+            }
+            DetailLine("备份版本", snapshot.plugin.backup?.version ?: "未备份")
+        }
+        VersionManager(currentVersion, snapshot.plugin.mountedVersion, snapshot.plugin.versions, state?.rollbackVersion,
+            state?.retentionLimit ?: 3, busy, onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
+        ConsoleSection("身份与运行信息") {
+            DetailLine("插件 ID", snapshot.plugin.pluginId)
+            DetailLine("运行时", manifest?.runtime?.kind ?: "-")
+            DetailLine("激活模式", manifest?.activationMode?.wireName ?: "-")
+            DetailLine("安装位置", "AI Limbs Plugin Store")
+            DetailLine("使用次数", snapshot.plugin.usage.useCount.toString())
+            DetailLine("最近使用", usageSummary(snapshot).substringAfter("最近使用："))
+        }
+        ConsoleSection("权限与能力") {
+            Text("请求权限", style = MaterialTheme.typography.labelLarge)
+            val scopes = manifest?.permissions?.requestedScopes.orEmpty()
+            if (scopes.isEmpty()) Text("未声明权限") else scopes.forEach { SelectionContainer { Text(it) } }
+            Divider()
+            Text("提供的能力", style = MaterialTheme.typography.labelLarge)
+            val capabilities = manifest?.provides?.capabilities.orEmpty()
+            if (capabilities.isEmpty()) Text("无") else capabilities.forEach { SelectionContainer { Text(it) } }
+            Divider()
+            Text("界面扩展", style = MaterialTheme.typography.labelLarge)
+            val extensions = manifest?.provides?.extensions.orEmpty()
+            if (extensions.isEmpty()) Text("无")
+            else extensions.forEach { SelectionContainer { Text(it.point + " / " + it.id) } }
+        }
+        ConsoleSection("依赖关系") {
+            DetailLine("被插件依赖", dependencySummary.parentPluginCount.toString() + " 个")
+            DetailLine("被子插件依赖", dependencySummary.childPluginCount?.let { it.toString() + " 个" } ?: "不可用")
+            Divider()
+            val pluginDeps = manifest?.dependencies?.plugins.orEmpty()
+            val serviceDeps = manifest?.dependencies?.services.orEmpty()
+            if (pluginDeps.isEmpty() && serviceDeps.isEmpty()) Text("没有声明依赖")
+            pluginDeps.forEach { Text("插件：" + it.pluginId + (it.minVersion?.let { v -> " >= " + v } ?: "")) }
+            serviceDeps.forEach { Text("服务：" + it.serviceId + (it.minApi?.let { api -> " API >= " + api } ?: "")) }
+        }
+        if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
+            ConsoleSection("卸载") {
+                Text("卸载时可选择保留或清除托管数据。", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                DangerOutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载插件") }
+            }
+        }
     }
 }
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun VersionManager(
     currentVersion: String?, mountedVersion: String?, versions: List<String>, rollbackVersion: String?, retentionLimit: Int, busy: Boolean,
     onActivateVersion: (String) -> Unit, onDeleteVersion: (String) -> Unit, onRollback: () -> Unit, onConfigureRetention: (Int) -> Unit
 ) {
-    Text("版本管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    var versionMenuExpanded by remember { mutableStateOf(false) }; var retentionMenuExpanded by remember { mutableStateOf(false) }
+    var versionMenuExpanded by remember { mutableStateOf(false) }
+    var retentionMenuExpanded by remember { mutableStateOf(false) }
     var selectedVersion by remember(versions, currentVersion) { mutableStateOf(currentVersion ?: versions.lastOrNull().orEmpty()) }
-    var showCustomRetention by remember { mutableStateOf(false) }; var customRetention by remember { mutableStateOf("") }
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("已激活", modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant); Text(currentVersion ?: "-", modifier = Modifier.weight(0.25f))
-        Box(modifier = Modifier.weight(0.40f)) {
-            OutlinedButton(onClick = { versionMenuExpanded = true }, enabled = !busy && versions.isNotEmpty()) { Text(if (selectedVersion.isBlank()) "选择版本" else selectedVersion + " ▼") }
+    var showCustomRetention by remember { mutableStateOf(false) }
+    var customRetention by remember { mutableStateOf("") }
+    ConsoleSection("版本管理") {
+        DetailLine("已激活", currentVersion ?: "-")
+        if (mountedVersion != null && mountedVersion != currentVersion) DetailLine("仍在运行", mountedVersion)
+        Text("选择已安装版本", style = MaterialTheme.typography.labelLarge)
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { versionMenuExpanded = true }, enabled = !busy && versions.isNotEmpty(),
+                modifier = Modifier.fillMaxWidth()) {
+                Text(if (selectedVersion.isBlank()) "暂无可选版本" else selectedVersion + " ▾")
+            }
             DropdownMenu(expanded = versionMenuExpanded, onDismissRequest = { versionMenuExpanded = false }) {
-                versions.asReversed().forEach { version -> DropdownMenuItem(text = { Text(version + when { version == currentVersion -> " · 已激活"; version == mountedVersion -> " · 运行中"; else -> "" }) }, onClick = { selectedVersion = version; versionMenuExpanded = false }) }
+                versions.asReversed().forEach { version ->
+                    DropdownMenuItem(
+                        text = { Text(version + when {
+                            version == currentVersion -> " · 已激活"
+                            version == mountedVersion -> " · 运行中"
+                            version == rollbackVersion -> " · 回滚目标"
+                            else -> ""
+                        }) },
+                        onClick = { selectedVersion = version; versionMenuExpanded = false }
+                    )
+                }
             }
         }
-    }
-    if (mountedVersion != null && mountedVersion != currentVersion) {
-        DetailLine("仍在运行", mountedVersion)
-    }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { onActivateVersion(selectedVersion) }, enabled = !busy && selectedVersion.isNotBlank() && selectedVersion != currentVersion) { Text("切换") }
-        OutlinedButton(onClick = { onDeleteVersion(selectedVersion) }, enabled = !busy && selectedVersion.isNotBlank() && selectedVersion != currentVersion && selectedVersion != mountedVersion && selectedVersion in versions) { Text("删除") }
-    }
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("自动保留版本", modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Box(modifier = Modifier.weight(0.65f)) {
-            OutlinedButton(onClick = { retentionMenuExpanded = true }, enabled = !busy) { Text(if (retentionLimit == 0) "不限制 ▼" else retentionLimit.toString() + " ▼") }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedButton(onClick = { onActivateVersion(selectedVersion) },
+                enabled = !busy && selectedVersion.isNotBlank() && selectedVersion != currentVersion) { Text("切换到此版本") }
+            DangerOutlinedButton(onClick = { onDeleteVersion(selectedVersion) },
+                enabled = !busy && selectedVersion.isNotBlank() && selectedVersion != currentVersion &&
+                    selectedVersion != mountedVersion && selectedVersion in versions) { Text("删除所选版本") }
+        }
+        if (selectedVersion.isNotBlank()) {
+            val note = when {
+                selectedVersion == currentVersion -> "已激活版本受保护，不能删除。"
+                selectedVersion == mountedVersion -> "此版本仍在运行，停止运行后才可删除。"
+                selectedVersion == rollbackVersion -> "删除此版本也会移除对应的即时回滚目标。"
+                else -> "可以手动删除未在使用的历史版本。"
+            }
+            Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Divider()
+        Text("自动保留版本", style = MaterialTheme.typography.labelLarge)
+        Box(Modifier.fillMaxWidth()) {
+            OutlinedButton(onClick = { retentionMenuExpanded = true }, enabled = !busy,
+                modifier = Modifier.fillMaxWidth()) {
+                Text(if (retentionLimit == 0) "不限制 ▾" else retentionLimit.toString() + " 个 ▾")
+            }
             DropdownMenu(expanded = retentionMenuExpanded, onDismissRequest = { retentionMenuExpanded = false }) {
-                listOf(1,2,3,5,10).forEach { limit -> DropdownMenuItem(text = { Text(if (limit == 3) "3（默认）" else limit.toString()) }, onClick = { retentionMenuExpanded = false; onConfigureRetention(limit) }) }
+                listOf(1, 2, 3, 5, 10).forEach { limit ->
+                    DropdownMenuItem(text = { Text(if (limit == 3) "3（默认）" else limit.toString()) },
+                        onClick = { retentionMenuExpanded = false; onConfigureRetention(limit) })
+                }
                 DropdownMenuItem(text = { Text("不限制") }, onClick = { retentionMenuExpanded = false; onConfigureRetention(0) })
-                DropdownMenuItem(text = { Text("自定义…") }, onClick = { retentionMenuExpanded = false; customRetention = ""; showCustomRetention = true })
+                DropdownMenuItem(text = { Text("自定义…") }, onClick = {
+                    retentionMenuExpanded = false; customRetention = ""; showCustomRetention = true
+                })
             }
         }
+        Divider()
+        DetailLine("即时回滚", rollbackVersion ?: "无")
+        if (rollbackVersion != null) OutlinedButton(onClick = onRollback, enabled = !busy) { Text("立即回滚") }
     }
-    DetailLine("即时回滚", rollbackVersion ?: "无"); if (rollbackVersion != null) OutlinedButton(onClick = onRollback, enabled = !busy) { Text("立即回滚") }
-    if (showCustomRetention) AlertDialog(onDismissRequest = { showCustomRetention = false }, title = { Text("自定义版本保留上限") },
-        text = { OutlinedTextField(value = customRetention, onValueChange = { customRetention = it.filter(Char::isDigit).take(3) }, label = { Text("1–100") }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { val limit = customRetention.toIntOrNull(); if (limit != null && limit in 1..100) { showCustomRetention = false; onConfigureRetention(limit) } }) { Text("确定") } },
-        dismissButton = { TextButton(onClick = { showCustomRetention = false }) { Text("取消") } })
+    if (showCustomRetention) {
+        val limit = customRetention.toIntOrNull()
+        AlertDialog(
+            onDismissRequest = { showCustomRetention = false },
+            title = { Text("自定义版本保留上限") },
+            text = { OutlinedTextField(
+                value = customRetention, onValueChange = { customRetention = it.filter(Char::isDigit).take(3) },
+                label = { Text("1–100") }, singleLine = true, modifier = Modifier.fillMaxWidth()
+            ) },
+            confirmButton = { TextButton(
+                enabled = !busy && limit != null && limit in 1..100,
+                onClick = { if (limit != null && limit in 1..100) { showCustomRetention = false; onConfigureRetention(limit) } }
+            ) { Text("确定") } },
+            dismissButton = { TextButton(onClick = { showCustomRetention = false }) { Text("取消") } }
+        )
+    }
 }
 
 @Composable
 private fun DetailLine(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        Text(label, modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, modifier = Modifier.weight(0.65f))
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        if (maxWidth < 340.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SelectionContainer { Text(value, style = MaterialTheme.typography.bodyMedium) }
+            }
+        } else {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(label, modifier = Modifier.weight(0.35f), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SelectionContainer(Modifier.weight(0.65f)) { Text(value, style = MaterialTheme.typography.bodyMedium) }
+            }
+        }
     }
 }

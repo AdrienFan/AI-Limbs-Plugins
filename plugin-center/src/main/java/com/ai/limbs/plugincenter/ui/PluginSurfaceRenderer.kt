@@ -646,6 +646,25 @@ private fun ChildExtensionListBlock(
     }
     val scope = rememberCoroutineScope()
     var feedback by remember(surface.ownerPluginId, point) { mutableStateOf<String?>(null) }
+    var uninstallTarget by remember(surface.ownerPluginId, point) {
+        mutableStateOf<com.ai.limbs.plugin.runtime.ChildExtensionSnapshot?>(null)
+    }
+    val controlPlane = remember(host) { com.ai.limbs.plugincenter.runtime.PluginControlPlaneFacade(host) }
+    uninstallTarget?.let { target ->
+        UninstallConfirmationDialog(
+            title = "卸载子插件",
+            displayName = "${target.displayName}（${target.extensionId}）",
+            onDismiss = { uninstallTarget = null },
+            onConfirm = { removeData ->
+                uninstallTarget = null
+                scope.launch {
+                    runCatching { controlPlane.uninstallChildExtension(target.extensionId, removeData) }
+                        .onSuccess { feedback = "已卸载 ${target.displayName}" }
+                        .onFailure { feedback = "卸载失败：${it.message}" }
+                }
+            }
+        )
+    }
     var expanded by remember(surface.ownerPluginId, point) { mutableStateOf(false) }
     var query by remember(surface.ownerPluginId, point) { mutableStateOf("") }
     val routedFocus = remember(surface.documentJson) {
@@ -783,13 +802,7 @@ private fun ChildExtensionListBlock(
                                         .onFailure { feedback = "备份失败：${it.message}" }
                                 }
                             }) { Text("备份") }
-                            Button(onClick = {
-                                scope.launch {
-                                    runCatching { host.childExtensions.uninstall(snapshot.extensionId) }
-                                        .onSuccess { feedback = if (it) "已卸载 ${snapshot.displayName}" else "子插件不存在" }
-                                        .onFailure { feedback = "卸载失败：${it.message}" }
-                                }
-                            }) { Text("卸载") }
+                            DangerOutlinedButton(onClick = { uninstallTarget = snapshot }) { Text("卸载") }
                         }
                     }
                 }

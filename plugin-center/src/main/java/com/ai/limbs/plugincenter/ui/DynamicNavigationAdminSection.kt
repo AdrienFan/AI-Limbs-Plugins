@@ -1,8 +1,11 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.ai.limbs.plugincenter.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.AlertDialog
@@ -100,37 +103,34 @@ internal fun DynamicNavigationAdminSection(
         }
     }
 
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    ConsolePanel() {
         Column(
-            Modifier.fillMaxWidth().padding(14.dp),
+            Modifier.fillMaxWidth().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             val allSelected = surfaces.isNotEmpty() && selectedSurfaceIds.size == surfaces.size
             val selectedTargets = surfaces.filter { it.surfaceId in selectedSurfaceIds }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("新增页管理", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                TextButton(
+            Text("新增页管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text("页面 " + surfaces.size + " 个 · 已选 " + selectedTargets.size + " 个",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(
                     enabled = !busy && surfaces.isNotEmpty(),
                     onClick = {
                         selectedSurfaceIds = if (allSelected) emptySet() else surfaces.mapTo(linkedSetOf()) { it.surfaceId }
                     }
                 ) { Text(if (allSelected) "取消全选" else "全选") }
-                TextButton(
+                DangerOutlinedButton(
                     enabled = !busy && selectedTargets.isNotEmpty() && selectedTargets.all { it.empty },
                     onClick = { bulkDeleteTargets = selectedTargets }
-                ) { Text("全部删除") }
+                ) { Text("删除所选空页面") }
             }
-            Text("页面 ${surfaces.size} 个", style = MaterialTheme.typography.bodySmall)
             if (surfaces.isEmpty()) {
                 Text("还没有动态页面；请用侧边栏底部的 ⊕ 创建。")
             }
             surfaces.forEachIndexed { index, surface ->
                 val pageNumber = index + 1
-                Card {
+                ConsolePanel {
                     Column(
                         Modifier.fillMaxWidth().padding(12.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -166,34 +166,32 @@ internal fun DynamicNavigationAdminSection(
                             }
                         }
                         val openAvailability = controlPlane.hostPrimitiveAvailability("host.ui.surface@1", "open")
-                        Row(
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             OutlinedButton(
                                 enabled = !busy && openAvailability.available,
-                                onClick = { openSurface(surface) },
-                                modifier = Modifier.weight(1f)
+                                onClick = { openSurface(surface) }
                             ) { Text("跳转") }
                             OutlinedButton(
                                 enabled = !busy,
-                                onClick = { renameTarget = surface },
-                                modifier = Modifier.weight(1f)
+                                onClick = { renameTarget = surface }
                             ) { Text("重命名") }
                         }
-                        Row(
+                        FlowRow(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             OutlinedButton(
                                 enabled = !busy,
-                                onClick = { iconTarget = surface },
-                                modifier = Modifier.weight(1f)
+                                onClick = { iconTarget = surface }
                             ) { Text("更换图标") }
                             DangerOutlinedButton(
                                 enabled = !busy && surface.empty,
-                                onClick = { deleteTarget = surface },
-                                modifier = Modifier.weight(1f)
+                                onClick = { deleteTarget = surface }
                             ) { Text("删除") }
                         }
                     }
@@ -300,7 +298,7 @@ private fun DynamicSurfaceIconDialog(
         title = { Text("选择页面图标") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                DYNAMIC_ICON_PRESETS.chunked(3).forEach { row ->
+                DYNAMIC_ICON_PRESETS.chunked(2).forEach { row ->
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -335,7 +333,7 @@ private fun DynamicSurfaceDeleteDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("仅空页面可以删除：$pageLabel")
-                Text("此操作始终需要管理员密码，且 Kernel 不提供级联删除。")
+                Text("此操作需要管理员密码。")
                 OutlinedTextField(
                     value = password,
                     onValueChange = { password = it },

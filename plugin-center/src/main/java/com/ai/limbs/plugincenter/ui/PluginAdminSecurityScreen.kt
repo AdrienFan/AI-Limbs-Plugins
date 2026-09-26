@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.ai.limbs.plugincenter.ui
 
 import android.content.Intent
@@ -5,13 +7,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,10 +23,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -55,7 +54,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -592,24 +590,22 @@ internal fun PluginAdminSecurityScreen(
             .sortedBy { pluginDisplayNames[it.key] ?: it.key }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
     Column(
         modifier = Modifier
+            .widthIn(max = 920.dp)
             .fillMaxSize()
             .verticalScroll(scrollState)
-            .padding(start = 16.dp, top = 16.dp, end = 22.dp, bottom = 16.dp),
+            .padding(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TextButton(onClick = onBack) { Text("← 插件管理") }
-        }
-        Text("管理员安全中心", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Row(
-            modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Card(modifier = Modifier.weight(1f).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        TextButton(onClick = onBack) { Text("← 总控台") }
+        Text("管理员中心", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        Text("安全、运行维护与开发设置", style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        ConsoleSectionHeading("安全与访问", "管理凭据、验证频率与本轮交互门禁")
+        ConsoleAdaptiveGroup {
+            ConsolePanel(modifier = Modifier.weight(1f)) {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -617,9 +613,9 @@ internal fun PluginAdminSecurityScreen(
                         Text("管理员凭据", fontWeight = FontWeight.Bold)
                         Text("管理员密码：已设置")
                         Text("恢复密钥：${if (adminSecurity.snapshot().recoveryConfigured) "已配置" else "未配置"}")
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("修改密码") }
-                            OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy, modifier = Modifier.weight(1f)) { Text("重新生成恢复密钥") }
+                        FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy) { Text("修改密码") }
+                            OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy) { Text("重置恢复密钥") }
                         }
                         Text(
                             interactionCycleStatusText,
@@ -628,7 +624,7 @@ internal fun PluginAdminSecurityScreen(
                         )
             }
             }
-            Card(modifier = Modifier.weight(1f).fillMaxHeight(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            ConsolePanel(modifier = Modifier.weight(1f)) {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -640,8 +636,8 @@ internal fun PluginAdminSecurityScreen(
                                 enabled = !busy,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("普通插件验证频率", modifier = Modifier.weight(1f))
+                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("普通插件验证频率", style = MaterialTheme.typography.labelSmall)
                                     Text(adminAuthFrequencyLabel(authFrequency))
                                 }
                             }
@@ -666,8 +662,8 @@ internal fun PluginAdminSecurityScreen(
                                 enabled = !busy,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Text("AI Limbs 交互周期", modifier = Modifier.weight(1f))
+                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("AI Limbs 交互周期", style = MaterialTheme.typography.labelSmall)
                                     Text(interactionCycleLabel(interactionCycleTimeoutMs))
                                 }
                             }
@@ -695,22 +691,21 @@ internal fun PluginAdminSecurityScreen(
                                 )
                             }
                         }
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedButton(
                                 onClick = { pendingInteractionGateAction = InteractionGateAction.REFRESH },
-                                enabled = !busy,
-                                modifier = Modifier.weight(1f)
+                                enabled = !busy
                             ) { Text("刷新本轮门禁") }
                             OutlinedButton(
                                 onClick = { pendingInteractionGateAction = InteractionGateAction.RELEASE },
-                                enabled = !busy,
-                                modifier = Modifier.weight(1f)
+                                enabled = !busy
                             ) { Text("释放本轮门禁") }
                         }
             }
             }
         }
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        ConsoleSectionHeading("运行与维护", "查看常驻进程状态，更新和维护总控台")
+        ConsolePanel() {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -803,7 +798,7 @@ internal fun PluginAdminSecurityScreen(
                 }
             }
         }
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        ConsolePanel() {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Plugin Center 版本与维护", fontWeight = FontWeight.Bold)
                 Text(
@@ -880,16 +875,18 @@ internal fun PluginAdminSecurityScreen(
                 )
             }
         }
+        ConsoleSectionHeading("页面管理", "整理新增页面的名称、图标和插件入口")
         DynamicNavigationAdminSection(
             navigation = navigation,
             controlPlane = controlPlane,
             onError = onError
         )
 
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        ConsoleSectionHeading("开发设置", "管理自动化策略、宿主接口和备份")
+        ConsolePanel() {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("开发模式", fontWeight = FontWeight.Bold)
                         Text("开启后才能修改宿主暴露给插件的接口。关闭开发模式不会自动重置已经保存的接口策略。", style = MaterialTheme.typography.bodySmall)
                     }
@@ -902,7 +899,8 @@ internal fun PluginAdminSecurityScreen(
             }
         }
         if (developerMode) {
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            ConsoleSectionHeading("自动化策略", "设置未使用插件的停用规则与自动备份")
+            ConsolePanel() {
                 Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("未使用插件自动禁用", fontWeight = FontWeight.Bold)
                     Text(
@@ -918,7 +916,7 @@ internal fun PluginAdminSecurityScreen(
                         )
                     }
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Text("秒级测试模式")
                             Text("仅用于开发验证，最低 ${PluginInactivityPolicyStore.MIN_TEST_SECONDS} 秒", style = MaterialTheme.typography.bodySmall)
                         }
@@ -945,7 +943,7 @@ internal fun PluginAdminSecurityScreen(
                             singleLine = true
                         )
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Button(
                             enabled = !busy,
                             onClick = {
@@ -968,7 +966,7 @@ internal fun PluginAdminSecurityScreen(
                     }
                 }
             }
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            ConsolePanel() {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -990,6 +988,7 @@ internal fun PluginAdminSecurityScreen(
                 }
             }
 
+            ConsoleSectionHeading("宿主接口", "按接口分组检索和管理访问策略")
             PluginCollectionSection(
                 title = "Host Primitives",
                 totalCount = primitives.size,
@@ -1007,14 +1006,14 @@ internal fun PluginAdminSecurityScreen(
                     )
                 }
             ) {
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         "显示 ${filteredPrimitives.size} / ${primitives.size}",
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedButton(
@@ -1051,9 +1050,8 @@ internal fun PluginAdminSecurityScreen(
                 }
             }
 
-            Divider()
             PluginCollectionSection(
-                title = "扩展点 / 插件总线 / 已接通策略",
+                title = "扩展点与插件总线",
                 totalCount = surfaces.size,
                 matchedCount = filteredSurfaces.size,
                 query = surfaceQuery,
@@ -1069,14 +1067,14 @@ internal fun PluginAdminSecurityScreen(
                     )
                 }
             ) {
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         "显示 ${filteredSurfaces.size} / ${surfaces.size}",
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.fillMaxWidth(),
                         style = MaterialTheme.typography.bodySmall
                     )
                     OutlinedButton(
@@ -1110,7 +1108,7 @@ internal fun PluginAdminSecurityScreen(
                 }
             }
 
-            Divider()
+            ConsoleSectionHeading("备份与恢复", "选择备份进行导出、恢复或删除")
             PluginCollectionSection(
                 title = "已备份插件",
                 totalCount = backups.size,
@@ -1139,7 +1137,7 @@ internal fun PluginAdminSecurityScreen(
             ) {
                 Text("已选择 ${selectedBackupIds.size} 个", style = MaterialTheme.typography.bodySmall)
                 backupExportFeedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Button(
                         enabled = !busy && selectedRestorableBackupIds.isNotEmpty(),
                         onClick = {
@@ -1161,41 +1159,25 @@ internal fun PluginAdminSecurityScreen(
                         style = MaterialTheme.typography.bodySmall
                     )
                 } else {
-                    val backupRowState = rememberLazyListState()
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        LazyRow(
-                            state = backupRowState,
-                            modifier = Modifier.fillMaxWidth(),
-                            contentPadding = PaddingValues(end = 36.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            items(filteredBackups, key = { it.pluginId }) { backup ->
-                                BackupPluginCard(
-                                    backup = backup,
-                                    selected = backup.pluginId in selectedBackupIds,
-                                    busy = busy,
-                                    modifier = Modifier.width(300.dp),
-                                    onSelectedChange = { selected ->
-                                        selectedBackupIds = if (selected) {
-                                            selectedBackupIds + backup.pluginId
-                                        } else {
-                                            selectedBackupIds - backup.pluginId
-                                        }
-                                    },
-                                    onRestore = { runAdminMutation { controlPlane.restoreBackup(backup.pluginId) } },
-                                    onDelete = { runAdminMutation { controlPlane.deleteBackup(backup.pluginId) } }
-                                )
-                            }
+                    ConsoleAdaptiveGroup {
+                        filteredBackups.forEach { backup ->
+                            BackupPluginCard(
+                                backup = backup,
+                                selected = backup.pluginId in selectedBackupIds,
+                                busy = busy,
+                                modifier = Modifier.weight(1f),
+                                onSelectedChange = { selected ->
+                                    selectedBackupIds = if (selected) selectedBackupIds + backup.pluginId
+                                        else selectedBackupIds - backup.pluginId
+                                },
+                                onRestore = { runAdminMutation { controlPlane.restoreBackup(backup.pluginId) } },
+                                onDelete = { runAdminMutation { controlPlane.deleteBackup(backup.pluginId) } }
+                            )
                         }
-                        LazyRowHorizontalScrollIndicator(
-                            state = backupRowState,
-                            totalItems = filteredBackups.size
-                        )
                     }
                 }
             }
 
-            Divider()
             PluginCollectionSection(
                 title = "已备份子插件",
                 totalCount = childBackups.size,
@@ -1224,7 +1206,7 @@ internal fun PluginAdminSecurityScreen(
             ) {
                 Text("已选择 ${selectedChildBackupIds.size} 个", style = MaterialTheme.typography.bodySmall)
                 childBackupExportFeedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Button(
                         enabled = !busy && selectedRestorableChildBackupIds.isNotEmpty(),
                         onClick = {
@@ -1351,11 +1333,13 @@ private fun DeveloperDiscoveryButton(
     discoveryEnabled: Boolean,
     onToggle: () -> Unit
 ) {
-    IconButton(enabled = enabled, onClick = onToggle) {
+    OutlinedButton(enabled = enabled, onClick = onToggle) {
         Icon(
             imageVector = if (discoveryEnabled) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-            contentDescription = if (discoveryEnabled) "关闭 AI 开发接口发现" else "打开 AI 开发接口发现"
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
         )
+        Text(if (discoveryEnabled) "  AI 接口发现：开" else "  AI 接口发现：关")
     }
 }
 
@@ -1367,7 +1351,7 @@ private fun HostPrimitiveCards(
 ) {
     primitives.forEach { item ->
         val definition = item.definition
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        ConsolePanel() {
             Row(
                 modifier = Modifier.fillMaxWidth().padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -1379,7 +1363,7 @@ private fun HostPrimitiveCards(
                         onCheckedChange = { onToggle(item, it) }
                     )
                 }
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         "HP-${definition.number.toString().padStart(3, '0')} · ${definition.title}",
                         fontWeight = FontWeight.Medium
@@ -1412,7 +1396,7 @@ private fun SurfaceGroups(
         if (items.isEmpty()) return@forEach
         Text(surfaceKindTitle(kind), fontWeight = FontWeight.Bold)
         items.forEach { item ->
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+            ConsolePanel() {
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(12.dp),
                     verticalAlignment = Alignment.CenterVertically
@@ -1422,7 +1406,7 @@ private fun SurfaceGroups(
                         enabled = !busy,
                         onCheckedChange = { onToggle(item, it) }
                     )
-                    Column(Modifier.weight(1f)) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text(item.definition.title, fontWeight = FontWeight.Medium)
                         Text(item.definition.id, style = MaterialTheme.typography.bodySmall)
                         Text(item.definition.detail, style = MaterialTheme.typography.bodySmall)
@@ -1450,14 +1434,11 @@ private fun BackupPluginCard(
     onRestore: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(
-        modifier = modifier,
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-    ) {
+    ConsolePanel(modifier = modifier) {
         Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = selected, enabled = !busy, onCheckedChange = onSelectedChange)
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(backup.manifest.display.name, fontWeight = FontWeight.Bold)
                     Text(backup.pluginId, style = MaterialTheme.typography.bodySmall)
                     Text("v${backup.version} · ${backup.manifest.runtime.kind}", style = MaterialTheme.typography.bodySmall)
@@ -1468,7 +1449,7 @@ private fun BackupPluginCard(
                     )
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Button(onClick = onRestore, enabled = !busy && !backup.installed) { Text("恢复") }
                 DangerOutlinedButton(onClick = onDelete, enabled = !busy) { Text("删除") }
             }
@@ -1490,7 +1471,7 @@ private fun ChildBackupPluginGroup(
 ) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(pluginName, fontWeight = FontWeight.Bold)
                 Text(pluginId, style = MaterialTheme.typography.bodySmall)
             }
@@ -1502,86 +1483,19 @@ private fun ChildBackupPluginGroup(
                 style = MaterialTheme.typography.bodySmall
             )
         }
-        val rowState = rememberLazyListState()
-        LazyRow(
-            state = rowState,
-            modifier = Modifier.fillMaxWidth(),
-            contentPadding = PaddingValues(end = 36.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            items(backups, key = { it.extensionId }) { backup ->
+        ConsoleAdaptiveGroup {
+            backups.forEach { backup ->
                 BackupChildExtensionCard(
                     backup = backup,
                     selected = backup.extensionId in selectedIds,
                     busy = busy,
-                    modifier = Modifier.width(260.dp),
+                    modifier = Modifier.weight(1f),
                     onSelectedChange = { selected -> onSelectedChange(backup.extensionId, selected) },
                     onRestore = { onRestore(backup.extensionId) },
                     onDelete = { onDelete(backup.extensionId) }
                 )
             }
         }
-        LazyRowHorizontalScrollIndicator(
-            state = rowState,
-            totalItems = backups.size
-        )
-    }
-}
-
-@Composable
-private fun LazyRowHorizontalScrollIndicator(
-    state: LazyListState,
-    totalItems: Int,
-    modifier: Modifier = Modifier
-) {
-    if (totalItems <= 0) return
-    val scope = rememberCoroutineScope()
-    val visibleItems = state.layoutInfo.visibleItemsInfo
-    val visibleCount = visibleItems.size.coerceAtLeast(1)
-    val maxFirstIndex = (totalItems - visibleCount).coerceAtLeast(0)
-    BoxWithConstraints(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(7.dp)
-            .pointerInput(totalItems, visibleCount, maxFirstIndex) {
-                fun seek(x: Float) {
-                    if (maxFirstIndex <= 0 || size.width <= 0) return
-                    val target = ((x / size.width.toFloat()).coerceIn(0f, 1f) * maxFirstIndex)
-                        .toInt()
-                        .coerceIn(0, maxFirstIndex)
-                    scope.launch { state.scrollToItem(target) }
-                }
-                detectHorizontalDragGestures(
-                    onDragStart = { offset -> seek(offset.x) },
-                    onHorizontalDrag = { change, _ ->
-                        change.consume()
-                        seek(change.position.x)
-                    }
-                )
-            }
-            .background(
-                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f),
-                RoundedCornerShape(99.dp)
-            )
-    ) {
-        val visibleFraction = (visibleCount.toFloat() / totalItems.toFloat()).coerceIn(0.12f, 1f)
-        val thumbWidth = maxWidth * visibleFraction
-        val firstItemSize = visibleItems.firstOrNull()?.size?.coerceAtLeast(1) ?: 1
-        val fractionalIndex = state.firstVisibleItemIndex +
-            state.firstVisibleItemScrollOffset.toFloat() / firstItemSize.toFloat()
-        val progress = if (maxFirstIndex == 0) 0f else {
-            (fractionalIndex / maxFirstIndex.toFloat()).coerceIn(0f, 1f)
-        }
-        Box(
-            Modifier
-                .offset(x = (maxWidth - thumbWidth) * progress)
-                .width(thumbWidth)
-                .height(7.dp)
-                .background(
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
-                    RoundedCornerShape(99.dp)
-                )
-        )
     }
 }
 
@@ -1595,11 +1509,11 @@ private fun BackupChildExtensionCard(
     onRestore: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(modifier = modifier, colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+    ConsolePanel(modifier = modifier) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Checkbox(checked = selected, enabled = !busy, onCheckedChange = onSelectedChange)
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(backup.displayName, fontWeight = FontWeight.Bold)
                     Text("v${backup.version} · .ailx", style = MaterialTheme.typography.bodySmall)
                     Text(backup.extensionId, style = MaterialTheme.typography.bodySmall)
@@ -1614,7 +1528,7 @@ private fun BackupChildExtensionCard(
                 },
                 style = MaterialTheme.typography.bodySmall
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Button(onClick = onRestore, enabled = !busy && !backup.installed) { Text("恢复") }
                 DangerOutlinedButton(onClick = onDelete, enabled = !busy) { Text("删除") }
             }
