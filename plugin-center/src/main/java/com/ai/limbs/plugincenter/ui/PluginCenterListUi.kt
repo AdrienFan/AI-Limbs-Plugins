@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -22,6 +23,15 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -136,8 +146,22 @@ internal fun PluginSearchSortControls(
         OutlinedTextField(
             value = input,
             onValueChange = onInputChange,
-            label = { Text("搜索插件") },
-            placeholder = { Text("名称、说明、ID、能力或扩展点") },
+            placeholder = { Text("搜索名称、ID 或能力") },
+            shape = RoundedCornerShape(16.dp),
+            trailingIcon = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (input.isNotBlank() || appliedQuery.isNotBlank()) {
+                        IconButton(onClick = {
+                            onClearSearch()
+                            focusManager.clearFocus()
+                        }) { Icon(Icons.Default.Close, contentDescription = "清除搜索") }
+                    }
+                    IconButton(onClick = {
+                        onApplySearch()
+                        focusManager.clearFocus()
+                    }) { Icon(Icons.Default.Search, contentDescription = "执行搜索") }
+                }
+            },
             modifier = Modifier.fillMaxWidth(),
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
@@ -151,16 +175,6 @@ internal fun PluginSearchSortControls(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            OutlinedButton(onClick = {
-                onApplySearch()
-                focusManager.clearFocus()
-            }) { Text("搜索") }
-            if (appliedQuery.isNotBlank()) {
-                TextButton(onClick = {
-                    onClearSearch()
-                    focusManager.clearFocus()
-                }) { Text("清除搜索") }
-            }
             Box {
                 OutlinedButton(onClick = { pageFilterExpanded = true }) {
                     Text(if (selectedPageFilterIds.isEmpty()) "页面" else "页面 · ${selectedPageFilterIds.size}")
@@ -270,14 +284,19 @@ internal fun CollapsiblePluginSectionHeader(
 ) {
     val countText = if (searching) "$matchedCount / $totalCount" else totalCount.toString()
     Card(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onToggle),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        modifier = Modifier.fillMaxWidth()
+            .semantics { stateDescription = if (expanded) "已展开" else "已收起" }
+            .clickable(onClick = onToggle),
+        shape = RoundedCornerShape(14.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp),
+            modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(if (expanded) "▼" else "▶", modifier = Modifier.padding(end = 8.dp))
+            Icon(if (expanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+                contentDescription = null, modifier = Modifier.padding(end = 8.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(title, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
             Text("$countText 个", style = MaterialTheme.typography.bodySmall)
         }

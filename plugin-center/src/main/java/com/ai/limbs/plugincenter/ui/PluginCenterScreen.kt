@@ -3,6 +3,7 @@ package com.ai.limbs.plugincenter.ui
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -129,8 +131,8 @@ private class PluginCenterHomeSessionState {
     var sortMode by mutableStateOf(PluginSortMode.NAME_ASC)
     var selectedPageFilterIds by mutableStateOf<Set<String>>(emptySet())
     var selectedStatusFilterIds by mutableStateOf<Set<String>>(emptySet())
-    var systemExpanded by mutableStateOf(false)
-    var installedExpanded by mutableStateOf(false)
+    var systemExpanded by mutableStateOf(true)
+    var installedExpanded by mutableStateOf(true)
     var expandedParentIds by mutableStateOf<Set<String>>(emptySet())
 }
 
@@ -812,36 +814,54 @@ private fun PluginCenterHome(
     val visibleInstalledParents = filterParentPluginsWithChildren(filteredInstalledParents, childrenByParent, normalizedQuery, session.sortMode)
     val searching = normalizedQuery.isNotBlank()
     val narrowing = searching || selectedPageFilterIds.isNotEmpty() || selectedStatusFilterIds.isNotEmpty()
+    LaunchedEffect(normalizedQuery, selectedPageFilterIds, selectedStatusFilterIds) {
+        if (narrowing) {
+            session.systemExpanded = true
+            session.installedExpanded = true
+        }
+    }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             state = listState,
-            modifier = Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(start = 16.dp, end = 23.dp, top = 16.dp, bottom = 16.dp),
+            modifier = Modifier.widthIn(max = 920.dp).fillMaxSize(),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 32.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             item(key = "plugin-center-header") {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        "AI Limbs 总控台",
-                        modifier = Modifier.weight(1f),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("AI Limbs", style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary)
+                            Text("总控台", style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold)
+                        }
+                        IconButton(onClick = onOpenSettings) {
+                            Icon(Icons.Default.Settings, contentDescription = "管理员安全与开发设置")
+                        }
+                    }
+                    ConsoleOverview(
+                        total = snapshots.size,
+                        running = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GREEN },
+                        attention = snapshots.count { pluginStatusLight(it) == PluginStatusLight.YELLOW },
+                        failed = snapshots.count { pluginStatusLight(it) == PluginStatusLight.RED },
+                        disabled = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GRAY }
                     )
-                    IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "管理员安全与开发设置")
+                    Button(onClick = onChoose, enabled = !busy) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.size(6.dp))
+                        Text("添加插件")
                     }
                 }
             }
-            item(key = "plugin-import") {
-                ImportPanel(
-                    candidates = candidates,
-                    busy = busy,
-                    onChoose = onChoose,
-                    onInstall = onInstall,
-                    onClear = onClearCandidates,
-                    onRemove = onRemoveCandidate
-                )
+            if (candidates.isNotEmpty()) {
+                item(key = "plugin-import") {
+                    ImportPanel(
+                        candidates = candidates, busy = busy, onChoose = onChoose,
+                        onInstall = onInstall, onClear = onClearCandidates, onRemove = onRemoveCandidate
+                    )
+                }
             }
             item(key = "plugin-search-sort") {
                 PluginSearchSortControls(
@@ -1042,6 +1062,7 @@ private fun PluginCenterHome(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ImportPanel(
     candidates: List<PluginImportCandidate>,
@@ -1110,7 +1131,7 @@ private fun ImportPanel(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Button(onClick = onInstall, enabled = !busy) {
                         Text(if (candidates.size == 1) "批准并安装" else "批准并安装全部")
                     }
@@ -1155,9 +1176,9 @@ private fun PluginCard(
     }
     Card(
         modifier = cardModifier,
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
     ) {
         Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1177,29 +1198,30 @@ private fun PluginCard(
                 }
                 if (childCount > 0) {
                     Text(
-                        "${if (childExpanded) "▼" else "▶"} 子插件 $childCount",
+                        "${if (childExpanded) "▾" else "▸"} $childCount",
+                        modifier = Modifier.padding(start = 8.dp),
                         style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.Medium
                     )
                 }
             }
             Text(
-                "当前运行：v${currentVersion ?: "-"} · ${manifest?.activationMode?.wireName ?: "-"} · ${manifest?.runtime?.kind ?: "-"}",
+                "v${currentVersion ?: "-"} · ${when (pluginStatusLight(snapshot)) {
+                    PluginStatusLight.GREEN -> "正常运行"
+                    PluginStatusLight.YELLOW -> "需要关注"
+                    PluginStatusLight.RED -> "运行故障"
+                    PluginStatusLight.GRAY -> "已停用"
+                }}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            latestInstalledVersion?.let { latest ->
+            latestInstalledVersion?.takeIf { hasInactiveLatestVersion }?.let { latest ->
                 Text(
-                    "已安装最新版：v$latest${if (hasInactiveLatestVersion) " · 尚未运行" else " · 当前运行"}",
+                    "新版本 v$latest 已安装 · 尚未运行",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (hasInactiveLatestVersion) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-            Text(
-                usageSummary(snapshot),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             Text(
                 dependencySummaryText(dependencySummary),
                 style = MaterialTheme.typography.bodySmall,
@@ -1212,24 +1234,14 @@ private fun PluginCard(
                     color = MaterialTheme.colorScheme.error
                 )
             }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                TextButton(onClick = onJump, enabled = jumpEnabled) { Text("跳转") }
-                TextButton(onClick = onOpen) { Text("详情") }
-                if (state?.enabled == true) {
-                    TextButton(onClick = onDisable) { Text("禁用") }
-                } else {
-                    TextButton(onClick = onEnable) { Text("启用") }
-                }
-                TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
-                TextButton(onClick = onUpdate) { Text("本地更新") }
-                TextButton(onClick = onOnlineUpgrade, enabled = parentOnlineUpgradeAvailable(snapshot)) { Text("在线更新") }
-                if (snapshot.plugin.pluginId != EXTENSION_HUB_PLUGIN_ID) {
-                    DangerTextButton(onClick = onUninstall) { Text("卸载") }
-                }
-            }
+            ConsoleCardActions(
+                jumpEnabled = jumpEnabled, onJump = onJump, onOpen = onOpen,
+                enabled = state?.enabled == true, onEnable = onEnable, onDisable = onDisable,
+                canBackup = canBackup, onBackup = onBackup, onUpdate = onUpdate,
+                onlineUpgradeEnabled = parentOnlineUpgradeAvailable(snapshot),
+                onOnlineUpgrade = onOnlineUpgrade,
+                onUninstall = if (snapshot.plugin.pluginId == EXTENSION_HUB_PLUGIN_ID) null else onUninstall
+            )
         }
     }
 }
@@ -1350,10 +1362,11 @@ private fun ChildExtensionCard(
     }
     val canBackup = child.backupVersion != child.version
     Card(
-        modifier = Modifier.fillMaxWidth().padding(start = 28.dp),
-        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
+        shape = RoundedCornerShape(16.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.72f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
         )
     ) {
         Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1363,12 +1376,17 @@ private fun ChildExtensionCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(child.displayName, fontWeight = FontWeight.Bold)
                     Text(
-                        "v${child.version} · ${child.lifecycle}",
+                        "v${child.version} · ${when {
+                            !child.enabled || child.lifecycle == "DISABLED" -> "已停用"
+                            child.lifecycle == "ACTIVE" -> "正常运行"
+                            child.lifecycle == "FAILED" -> "运行故障"
+                            else -> "需要关注"
+                        }}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Text(".ailx", style = MaterialTheme.typography.bodySmall)
+                Text("子插件", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             child.description?.takeIf { it.isNotBlank() }?.let {
                 Text(
@@ -1380,11 +1398,6 @@ private fun ChildExtensionCard(
                 )
             }
             Text(
-                "${child.extensionId} · ${child.point}@${child.apiVersion}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Text(
                 "使用 ${child.useCount} 次 · 备份 ${child.backupVersion ?: "无"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -1392,22 +1405,13 @@ private fun ChildExtensionCard(
             child.lastError?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                TextButton(onClick = onJump, enabled = jumpEnabled) { Text("跳转") }
-                TextButton(onClick = onOpen) { Text("详情") }
-                if (child.enabled) {
-                    TextButton(onClick = onDisable) { Text("禁用") }
-                } else {
-                    TextButton(onClick = onEnable) { Text("启用") }
-                }
-                TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
-                TextButton(onClick = onUpgrade) { Text("本地更新") }
-                TextButton(onClick = onOnlineUpgrade, enabled = onlineUpgradeEnabled) { Text("在线更新") }
-                DangerTextButton(onClick = onUninstall) { Text("卸载") }
-            }
+            ConsoleCardActions(
+                jumpEnabled = jumpEnabled, onJump = onJump, onOpen = onOpen,
+                enabled = child.enabled, onEnable = onEnable, onDisable = onDisable,
+                canBackup = canBackup, onBackup = onBackup, onUpdate = onUpgrade,
+                onlineUpgradeEnabled = onlineUpgradeEnabled,
+                onOnlineUpgrade = onOnlineUpgrade, onUninstall = onUninstall
+            )
         }
     }
 }
@@ -1423,6 +1427,7 @@ private fun StatusDot(snapshot: PluginControlSnapshot) {
     Box(modifier = Modifier.size(11.dp).background(color, CircleShape))
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ChildExtensionDetail(
     child: ChildExtensionSummary,
@@ -1469,6 +1474,7 @@ private fun ChildExtensionDetail(
         VersionManager(child.version, child.versions, child.rollbackVersion, child.retentionLimit, busy, onActivateVersion, onDeleteVersion, onRollback, onConfigureRetention)
     }
 }
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun PluginDetail(
     snapshot: PluginControlSnapshot,
@@ -1509,7 +1515,7 @@ private fun PluginDetail(
         Text("依赖", fontWeight = FontWeight.Bold); val pluginDeps = manifest?.dependencies?.plugins.orEmpty(); val serviceDeps = manifest?.dependencies?.services.orEmpty()
         if (pluginDeps.isEmpty() && serviceDeps.isEmpty()) Text("无") else { pluginDeps.forEach { Text("插件：" + it.pluginId + (it.minVersion?.let { v -> " >= " + v } ?: "")) }; serviceDeps.forEach { Text("服务：" + it.serviceId + (it.minApi?.let { api -> " API >= " + api } ?: "")) } }
         Divider()
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             if (state?.enabled == true) Button(onClick = onDisable, enabled = !busy) { Text("禁用") } else Button(onClick = onEnable, enabled = !busy) { Text("启用") }
             OutlinedButton(onClick = onOnlineUpgrade, enabled = !busy && parentOnlineUpgradeAvailable(snapshot)) { Text("在线更新") }
             OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("本地更新") }
