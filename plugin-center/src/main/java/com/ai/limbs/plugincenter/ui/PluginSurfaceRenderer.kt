@@ -1013,8 +1013,10 @@ private fun DynamicPanelBlock(
                 val requiredReady = required.all { values[it].orEmpty().isNotBlank() }
                 DynamicPanelActionButton(
                     action = action,
+                    ownerPluginId = surface.ownerPluginId,
                     enabled = action.optBoolean("enabled", true) && requiredReady && busyAction == null,
                     busy = busyAction == actionId,
+                    onStageError = { feedback = "选择文件失败：${it.message ?: it::class.java.simpleName}" },
                     onInvoke = { extra -> submit(actionId, extra) }
                 )
             }
@@ -1054,8 +1056,10 @@ private fun DynamicPanelBlock(
                 val requiredReady = required.all { values[it].orEmpty().isNotBlank() }
                 DynamicPanelActionButton(
                     action = action,
+                    ownerPluginId = surface.ownerPluginId,
                     enabled = action.optBoolean("enabled", true) && requiredReady && busyAction == null,
                     busy = busyAction == actionId,
+                    onStageError = { feedback = "选择文件失败：${it.message ?: it::class.java.simpleName}" },
                     onInvoke = { extra -> submit(actionId, extra) }
                 )
             }
@@ -1091,18 +1095,23 @@ private fun DynamicPanelConsole(console: JSONObject) {
 }
 
 /**
- * Generic Plugin Center picker action. The picker returns opaque content/tree URIs to the provider;
- * Plugin Center does not interpret the selected files and therefore stays reusable across plugins.
+ * Only an explicit host_staged action crosses the resident process boundary as a private file.
+ * Existing opaque-URI actions keep their published picker contract unchanged.
  */
 @Composable
 private fun DynamicPanelActionButton(
     action: JSONObject,
+    ownerPluginId: String,
     enabled: Boolean,
     busy: Boolean,
+    onStageError: (Throwable) -> Unit,
     onInvoke: (JSONObject?) -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var stagingBusy by remember(action, ownerPluginId) { mutableStateOf(false) }
     val kind = action.optString("kind", "invoke").trim().lowercase()
+    val transport = action.optString("file_transport", "opaque_uri")
     val label = action.requiredText("label")
     val multiple = action.optBoolean("multiple", false)
     val mimeTypes = action.optJSONArray("mime_types").toStringList()
@@ -1112,33 +1121,81 @@ private fun DynamicPanelActionButton(
     fun persistRead(uri: android.net.Uri) {
         runCatching {
             context.contentResolver.takePersistableUriPermission(
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         }
     }
 
-    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            persistRead(uri)
-            onInvoke(JSONObject().put("selected_uri", uri.toString()))
-        }
-    }
-    val multiFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) {
-            uris.forEach(::persistRead)
-            onInvoke(JSONObject().put("selected_uris", JSONArray(uris.map { it.toString() })))
-        }
-    }
-    val directoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
-        if (uri != null) {
-            persistRead(uri)
-            onInvoke(JSONObject().put("selected_uri", uri.toString()))
+    fun selectedFiles(uris: List<android.net.Uri>) {
+        if (uris.isEmpty()) return
+        when (transport) {
+            "opaque_uri" -> {
+                uris.forEach(::persistRead)
+                if (multiple) onInvoke(JSONObject().put("selected_uris", JSONArray(uris.map { it.toString() })))
+                else onInvoke(JSONObject().put("selected_uri", uris.single().toString()))
+            }
+            "host_staged" -> scope.launch {
+                stagingBusy = true
+                try {
+                    val paths = PluginCenterStagedSources.files(context, ownerPluginId, uris)
+                    if (multiple) onInvoke(JSONObject().put("selected_uris", JSONArray(paths)))
+                    else onInvoke(JSONObject().put("selected_uri", paths.single()))
+                } catch (error: Throwable) {
+                    onStageError(error)
+                } finally {
+                    stagingBusy = false
+                }
+            }
+            "host_inline" -> scope.launch {
+                stagingBusy = true
+                try {
+                    require(!multiple && uris.size == 1) { "私钥只能单选" }
+                    val encoded = PluginCenterStagedSources.privateKey(context, uris.single())
+                    onInvoke(JSONObject().put("selected_base64", encoded))
+                } catch (error: Throwable) {
+                    onStageError(error)
+                } finally {
+                    stagingBusy = false
+                }
+            }
+            else -> onStageError(IllegalArgumentException("未知文件交接方式：$transport"))
         }
     }
 
+    fun selectedDirectory(uri: android.net.Uri?) {
+        if (uri == null) return
+        when (transport) {
+            "opaque_uri" -> {
+                persistRead(uri)
+                onInvoke(JSONObject().put("selected_uri", uri.toString()))
+            }
+            "host_staged" -> scope.launch {
+                stagingBusy = true
+                try {
+                    val paths = PluginCenterStagedSources.apkTree(context, ownerPluginId, uri)
+                    onInvoke(JSONObject().put("selected_uris", JSONArray(paths)))
+                } catch (error: Throwable) {
+                    onStageError(error)
+                } finally {
+                    stagingBusy = false
+                }
+            }
+            else -> onStageError(IllegalArgumentException("未知文件交接方式：$transport"))
+        }
+    }
+
+    val fileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) selectedFiles(listOf(uri))
+    }
+    val multiFileLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        selectedFiles(uris)
+    }
+    val directoryLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        selectedDirectory(uri)
+    }
+
     Button(
-        enabled = enabled,
+        enabled = enabled && !stagingBusy,
         modifier = Modifier.fillMaxWidth(),
         onClick = {
             when (kind) {
@@ -1148,7 +1205,7 @@ private fun DynamicPanelActionButton(
             }
         }
     ) {
-        Text(if (busy) "处理中…" else label)
+        Text(if (busy || stagingBusy) "处理中…" else label)
     }
 }
 
