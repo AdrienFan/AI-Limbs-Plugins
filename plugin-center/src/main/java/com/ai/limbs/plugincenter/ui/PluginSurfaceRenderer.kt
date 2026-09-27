@@ -1,9 +1,12 @@
 package com.ai.limbs.plugincenter.ui
 
+import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.view.View
 import android.provider.OpenableColumns
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.border
@@ -49,6 +52,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.text.font.FontFamily
@@ -1098,6 +1102,16 @@ private fun DynamicPanelConsole(console: JSONObject) {
  * Only an explicit host_staged action crosses the resident process boundary as a private file.
  * Existing opaque-URI actions keep their published picker contract unchanged.
  */
+private fun pickerActivity(owner: Any?, viewContext: Context): Activity {
+    if (owner is Activity) return owner
+    var current: Context = viewContext
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    throw IllegalStateException("文件选择器未绑定宿主 Activity，无法读取系统文档")
+}
+
 @Composable
 private fun DynamicPanelActionButton(
     action: JSONObject,
@@ -1107,7 +1121,9 @@ private fun DynamicPanelActionButton(
     onStageError: (Throwable) -> Unit,
     onInvoke: (JSONObject?) -> Unit
 ) {
-    val context = LocalContext.current
+    val registryOwner = LocalActivityResultRegistryOwner.current
+    val viewContext = LocalView.current.context
+    fun pickerContext(): Activity = pickerActivity(registryOwner, viewContext)
     val scope = rememberCoroutineScope()
     var stagingBusy by remember(action, ownerPluginId) { mutableStateOf(false) }
     val kind = action.optString("kind", "invoke").trim().lowercase()
@@ -1120,7 +1136,7 @@ private fun DynamicPanelActionButton(
 
     fun persistRead(uri: android.net.Uri) {
         runCatching {
-            context.contentResolver.takePersistableUriPermission(
+            pickerContext().contentResolver.takePersistableUriPermission(
                 uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
             )
         }
@@ -1137,7 +1153,7 @@ private fun DynamicPanelActionButton(
             "host_staged" -> scope.launch {
                 stagingBusy = true
                 try {
-                    val paths = PluginCenterStagedSources.files(context, ownerPluginId, uris)
+                    val paths = PluginCenterStagedSources.files(pickerContext(), ownerPluginId, uris)
                     if (multiple) onInvoke(JSONObject().put("selected_uris", JSONArray(paths)))
                     else onInvoke(JSONObject().put("selected_uri", paths.single()))
                 } catch (error: Throwable) {
@@ -1150,7 +1166,7 @@ private fun DynamicPanelActionButton(
                 stagingBusy = true
                 try {
                     require(!multiple && uris.size == 1) { "私钥只能单选" }
-                    val encoded = PluginCenterStagedSources.privateKey(context, uris.single())
+                    val encoded = PluginCenterStagedSources.privateKey(pickerContext(), uris.single())
                     onInvoke(JSONObject().put("selected_base64", encoded))
                 } catch (error: Throwable) {
                     onStageError(error)
@@ -1172,7 +1188,7 @@ private fun DynamicPanelActionButton(
             "host_staged" -> scope.launch {
                 stagingBusy = true
                 try {
-                    val paths = PluginCenterStagedSources.apkTree(context, ownerPluginId, uri)
+                    val paths = PluginCenterStagedSources.apkTree(pickerContext(), ownerPluginId, uri)
                     onInvoke(JSONObject().put("selected_uris", JSONArray(paths)))
                 } catch (error: Throwable) {
                     onStageError(error)

@@ -58,6 +58,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
@@ -604,24 +605,120 @@ internal fun PluginAdminSecurityScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         ConsoleSectionHeading("安全与访问", "管理凭据、验证频率与本轮交互门禁")
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            ConsolePanel(modifier = Modifier.weight(1f)) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("管理员凭据", fontWeight = FontWeight.Bold)
-                        Text("管理员密码：已设置")
-                        Text("恢复密钥：${if (adminSecurity.snapshot().recoveryConfigured) "已配置" else "未配置"}")
-                        FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy) { Text("修改密码") }
-                            OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy) { Text("重置恢复密钥") }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                ConsolePanel() {
+                        Column(
+                            modifier = Modifier.padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text("管理员凭据", fontWeight = FontWeight.Bold)
+                            Text("管理员密码：已设置")
+                            Text("恢复密钥：${if (adminSecurity.snapshot().recoveryConfigured) "已配置" else "未配置"}")
+                            FlowRow(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy) { Text("修改密码") }
+                                OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy) { Text("重置恢复密钥") }
+                            }
+                            Text(
+                                interactionCycleStatusText,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                }
+                }
+                ConsoleSectionHeading("运行与维护", "查看常驻进程状态，更新和维护总控台")
+                ConsolePanel() {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                Text("AI Limbs 常驻进程", fontWeight = FontWeight.Bold)
+                                Text(
+                                    residentRuntimePhaseLabel(residentRuntimePhase, residentRuntimeEnabled),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (residentRuntimePhase == "failed" || residentRuntimePhase == "off_failed") {
+                                        MaterialTheme.colorScheme.error
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                                Text(
+                                    "开启后由 Resident Core 接管后台业务；关闭后回到普通 Host。切换期间 Host 可能自动重启。",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (residentRuntimeStateMismatch) {
+                                    Text(
+                                        "检测到期望状态为关闭，但 Resident/Guardian 仍在运行。开关按实际状态保持开启；再次关闭会继续执行清理。",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = residentRuntimeSwitchChecked,
+                                enabled = residentRuntimeLoaded && !busy && !residentToggleBusy,
+                                onCheckedChange = { target ->
+                                    residentRuntimeEnabled = target
+                                    residentRuntimeSwitchChecked = target
+                                    residentRuntimeStateMismatch = false
+                                    residentRuntimePhase = if (target) "starting" else "stopping"
+                                    residentRuntimeError = null
+                                    residentDetailsExpanded = false
+                                    residentToggleBusy = true
+                                    scope.launch {
+                                        val before = runCatching {
+                                            withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() }
+                                        }.getOrNull()
+                                        if (before != null) {
+                                            residentRuntimeStateMismatch = before.stateMismatch
+                                        }
+                                        val result = runCatching {
+                                            withContext(Dispatchers.IO) { controlPlane.setResidentRuntimeEnabled(target) }
+                                        }
+                                        result.onSuccess { resident ->
+                                            residentRuntimeEnabled = resident.enabled
+                                            residentRuntimeSwitchChecked = resident.switchChecked
+                                            residentRuntimeStateMismatch = resident.stateMismatch
+                                            residentRuntimePhase = resident.phase
+                                            residentRuntimeError = resident.lastError
+                                            residentRuntimeLoaded = true
+                                        }.onFailure { error ->
+                                            val refreshed = runCatching {
+                                                withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() }
+                                            }.getOrNull()
+                                            if (refreshed != null) {
+                                                residentRuntimeEnabled = refreshed.enabled
+                                                residentRuntimeSwitchChecked = refreshed.switchChecked
+                                                residentRuntimeStateMismatch = refreshed.stateMismatch
+                                                residentRuntimePhase = refreshed.phase
+                                                residentRuntimeError = refreshed.lastError
+                                                residentRuntimeLoaded = true
+                                                if (refreshed.switchChecked != target || refreshed.lastError != null) onError(error)
+                                            } else {
+                                                residentRuntimeLoaded = false
+                                            }
+                                            // A successful ON/OFF role transition may terminate/restart this Host before
+                                            // the RPC can return. If status is temporarily unreachable, keep the target
+                                            // state optimistic but disable further toggles; the rebuilt Host reloads the
+                                            // authoritative value before the control becomes interactive again.
+                                        }
+                                        residentToggleBusy = false
+                                    }
+                                }
+                            )
                         }
-                        Text(
-                            interactionCycleStatusText,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-            }
+                        if (residentRuntimeError != null) {
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                Text("运行时返回了错误，可展开查看诊断详情。", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                                TextButton(onClick = { residentDetailsExpanded = !residentDetailsExpanded }) { Text(if (residentDetailsExpanded) "收起" else "详情") }
+                            }
+                            if (residentDetailsExpanded) Text(residentRuntimeError.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
+                }
             }
             ConsolePanel(modifier = Modifier.weight(1f)) {
                     Column(
@@ -635,9 +732,9 @@ internal fun PluginAdminSecurityScreen(
                                 enabled = !busy,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("普通插件验证频率", style = MaterialTheme.typography.labelSmall)
-                                    Text(adminAuthFrequencyLabel(authFrequency))
+                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("普通插件验证频率", style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+                                    Text(adminAuthFrequencyLabel(authFrequency), textAlign = TextAlign.Center)
                                 }
                             }
                             DropdownMenu(
@@ -661,9 +758,9 @@ internal fun PluginAdminSecurityScreen(
                                 enabled = !busy,
                                 modifier = Modifier.fillMaxWidth()
                             ) {
-                                Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text("AI Limbs 交互周期", style = MaterialTheme.typography.labelSmall)
-                                    Text(interactionCycleLabel(interactionCycleTimeoutMs))
+                                Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Text("AI Limbs 交互周期", style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
+                                    Text(interactionCycleLabel(interactionCycleTimeoutMs), textAlign = TextAlign.Center)
                                 }
                             }
                             DropdownMenu(
@@ -701,100 +798,6 @@ internal fun PluginAdminSecurityScreen(
                             ) { Text("释放本轮门禁") }
                         }
             }
-            }
-        }
-        ConsoleSectionHeading("运行与维护", "查看常驻进程状态，更新和维护总控台")
-        ConsolePanel() {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text("AI Limbs 常驻进程", fontWeight = FontWeight.Bold)
-                        Text(
-                            residentRuntimePhaseLabel(residentRuntimePhase, residentRuntimeEnabled),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (residentRuntimePhase == "failed" || residentRuntimePhase == "off_failed") {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
-                        )
-                        Text(
-                            "开启后由 Resident Core 接管后台业务；关闭后回到普通 Host。切换期间 Host 可能自动重启。",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        if (residentRuntimeStateMismatch) {
-                            Text(
-                                "检测到期望状态为关闭，但 Resident/Guardian 仍在运行。开关按实际状态保持开启；再次关闭会继续执行清理。",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error
-                            )
-                        }
-                    }
-                    Switch(
-                        checked = residentRuntimeSwitchChecked,
-                        enabled = residentRuntimeLoaded && !busy && !residentToggleBusy,
-                        onCheckedChange = { target ->
-                            residentRuntimeEnabled = target
-                            residentRuntimeSwitchChecked = target
-                            residentRuntimeStateMismatch = false
-                            residentRuntimePhase = if (target) "starting" else "stopping"
-                            residentRuntimeError = null
-                            residentDetailsExpanded = false
-                            residentToggleBusy = true
-                            scope.launch {
-                                val before = runCatching {
-                                    withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() }
-                                }.getOrNull()
-                                if (before != null) {
-                                    residentRuntimeStateMismatch = before.stateMismatch
-                                }
-                                val result = runCatching {
-                                    withContext(Dispatchers.IO) { controlPlane.setResidentRuntimeEnabled(target) }
-                                }
-                                result.onSuccess { resident ->
-                                    residentRuntimeEnabled = resident.enabled
-                                    residentRuntimeSwitchChecked = resident.switchChecked
-                                    residentRuntimeStateMismatch = resident.stateMismatch
-                                    residentRuntimePhase = resident.phase
-                                    residentRuntimeError = resident.lastError
-                                    residentRuntimeLoaded = true
-                                }.onFailure { error ->
-                                    val refreshed = runCatching {
-                                        withContext(Dispatchers.IO) { controlPlane.residentRuntimeStatus() }
-                                    }.getOrNull()
-                                    if (refreshed != null) {
-                                        residentRuntimeEnabled = refreshed.enabled
-                                        residentRuntimeSwitchChecked = refreshed.switchChecked
-                                        residentRuntimeStateMismatch = refreshed.stateMismatch
-                                        residentRuntimePhase = refreshed.phase
-                                        residentRuntimeError = refreshed.lastError
-                                        residentRuntimeLoaded = true
-                                        if (refreshed.switchChecked != target || refreshed.lastError != null) onError(error)
-                                    } else {
-                                        residentRuntimeLoaded = false
-                                    }
-                                    // A successful ON/OFF role transition may terminate/restart this Host before
-                                    // the RPC can return. If status is temporarily unreachable, keep the target
-                                    // state optimistic but disable further toggles; the rebuilt Host reloads the
-                                    // authoritative value before the control becomes interactive again.
-                                }
-                                residentToggleBusy = false
-                            }
-                        }
-                    )
-                }
-                if (residentRuntimeError != null) {
-                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Text("运行时返回了错误，可展开查看诊断详情。", modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                        TextButton(onClick = { residentDetailsExpanded = !residentDetailsExpanded }) { Text(if (residentDetailsExpanded) "收起" else "详情") }
-                    }
-                    if (residentDetailsExpanded) Text(residentRuntimeError.orEmpty(), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-                }
             }
         }
         ConsolePanel() {
@@ -1428,8 +1431,8 @@ private fun BackupPluginCard(
     onRestore: () -> Unit,
     onDelete: () -> Unit
 ) {
-    ConsolePanel(modifier = modifier) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    ConsolePanel(modifier = modifier.height(220.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Checkbox(checked = selected, enabled = !busy, onCheckedChange = onSelectedChange)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -1463,8 +1466,8 @@ private fun BackupChildExtensionCard(
     onRestore: () -> Unit,
     onDelete: () -> Unit
 ) {
-    ConsolePanel(modifier = modifier) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+    ConsolePanel(modifier = modifier.height(220.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
             Row(verticalAlignment = Alignment.Top) {
                 Checkbox(checked = selected, enabled = !busy, onCheckedChange = onSelectedChange)
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
