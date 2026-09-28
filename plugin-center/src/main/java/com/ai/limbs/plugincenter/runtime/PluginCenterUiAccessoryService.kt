@@ -5,6 +5,14 @@ import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.SystemPluginProviderBindingV2
 import com.ai.assistance.operit.plugins.system.SystemPluginServiceCallerV2
 import com.ai.assistance.operit.plugins.system.SystemPluginServiceEndpointV2
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,6 +26,9 @@ internal data class PageSlotActionRegistration(
     val slotId: String,
     val providerId: String,
     val screenId: String,
+    val actionKind: String,
+    val overlayId: String,
+    val badgeCapabilityId: String,
     val iconKey: String,
     val contentDescription: String,
     val priority: Int
@@ -29,6 +40,8 @@ internal object PluginCenterPageSlotActions {
     val actions: StateFlow<List<PageSlotActionRegistration>> = mutableActions.asStateFlow()
 
     fun upsert(action: PageSlotActionRegistration) = synchronized(lock) {
+        if (mutableActions.value.any { it.ownerPluginId == action.ownerPluginId &&
+                it.actionId == action.actionId && it == action }) return@synchronized
         mutableActions.value = (mutableActions.value.filterNot {
             it.ownerPluginId == action.ownerPluginId && it.actionId == action.actionId
         } + action).sortedWith(
@@ -52,6 +65,9 @@ internal object PluginCenterPageSlotActions {
 internal class PluginCenterUiAccessoryService(
     private val host: SystemPluginHostV2
 ) {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val declaredActions = mutableSetOf<Pair<String, String>>()
+
     fun publish(): AutoCloseable {
         val handle = host.services.publish(
             id = SERVICE_ID,
@@ -59,9 +75,16 @@ internal class PluginCenterUiAccessoryService(
             endpoint = SystemPluginServiceEndpointV2(::invoke),
             metadata = mapOf("authority" to "plugin_center", "kind" to "page_slot_registry")
         )
-        restoreDeclaredPageSlotActions()
+        reconcileDeclaredPageSlotActions()
+        scope.launch {
+            while (isActive) {
+                delay(1_500L)
+                reconcileDeclaredPageSlotActions()
+            }
+        }
         return AutoCloseable {
-            runCatching { handle.close() }
+            scope.cancel()
+            handle.close()
             PluginCenterPageSlotActions.clear()
         }
     }
@@ -102,29 +125,54 @@ internal class PluginCenterUiAccessoryService(
             .put("action_id", actionId)
     }
 
-    private fun restoreDeclaredPageSlotActions() {
+    private fun reconcileDeclaredPageSlotActions() {
+        val current = mutableSetOf<Pair<String, String>>()
         host.providers.snapshot().forEach { binding ->
-            if (binding.metadata["kind"] != "plugin_page") return@forEach
+            if (binding.metadata["kind"] != "plugin_page" &&
+                binding.metadata["overlay_enabled"] != "true") return@forEach
             val raw = binding.metadata[PAGE_SLOT_ACTIONS_METADATA].orEmpty().trim()
             if (raw.isEmpty()) return@forEach
             val declarations = runCatching { JSONArray(raw) }.getOrNull() ?: return@forEach
             for (index in 0 until declarations.length()) {
                 val declaration = declarations.optJSONObject(index) ?: continue
                 runCatching { registrationFor(binding, declaration) }
-                    .onSuccess(PluginCenterPageSlotActions::upsert)
+                    .onSuccess { action ->
+                        current += action.ownerPluginId to action.actionId
+                        PluginCenterPageSlotActions.upsert(action)
+                    }
             }
         }
+        (declaredActions - current).forEach { (owner, action) ->
+            PluginCenterPageSlotActions.remove(owner, action)
+        }
+        declaredActions.clear()
+        declaredActions.addAll(current)
     }
 
     private fun registrationFor(
         binding: SystemPluginProviderBindingV2,
         parameters: JSONObject
     ): PageSlotActionRegistration {
-        require(binding.metadata["kind"] == "plugin_page") {
-            "Page slot action provider must be a plugin_page provider"
+        val actionKind = parameters.optString("action_kind", "open_page").trim()
+        require(actionKind == "open_page" || actionKind == "overlay") {
+            "Unsupported page slot action kind: $actionKind"
         }
         val screenId = binding.metadata["screen_id"].orEmpty().trim()
-        require(screenId.isNotEmpty()) { "Page slot provider has no screen_id" }
+        val overlayId = parameters.optString("overlay_id").trim()
+        val badgeCapabilityId = parameters.optString("badge_capability_id").trim()
+        require(badgeCapabilityId.isEmpty() ||
+            (actionKind == "overlay" && badgeCapabilityId.startsWith("${binding.ownerPluginId}."))) {
+            "Badge capability must belong to the overlay provider owner"
+        }
+        if (actionKind == "open_page") {
+            require(binding.metadata["kind"] == "plugin_page" && screenId.isNotEmpty()) {
+                "Page slot provider must declare a plugin_page screen"
+            }
+        } else {
+            require(binding.metadata["overlay_enabled"] == "true" && overlayId.isNotEmpty()) {
+                "Overlay action requires a declared overlay provider and overlay_id"
+            }
+        }
         val actionId = parameters.requiredText("action_id")
         val targetPageId = parameters.requiredText("target_page_id")
         require(TARGET_PAGE_PREFIXES.any { prefix -> targetPageId.startsWith(prefix) }) {
@@ -143,6 +191,9 @@ internal class PluginCenterUiAccessoryService(
             slotId = slotId,
             providerId = binding.id,
             screenId = screenId,
+            actionKind = actionKind,
+            overlayId = overlayId,
+            badgeCapabilityId = badgeCapabilityId,
             iconKey = iconKey,
             contentDescription = description,
             priority = priority
@@ -156,6 +207,8 @@ internal class PluginCenterUiAccessoryService(
             .put("target_page_id", action.targetPageId)
             .put("slot_id", action.slotId)
             .put("screen_id", action.screenId)
+            .put("action_kind", action.actionKind)
+            .put("overlay_id", action.overlayId)
 
     private fun JSONObject.requiredText(name: String): String =
         optString(name).trim().also { require(it.isNotEmpty()) { "$name is required" } }
