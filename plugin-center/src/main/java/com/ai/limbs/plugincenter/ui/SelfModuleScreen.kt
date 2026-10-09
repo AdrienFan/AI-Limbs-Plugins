@@ -134,6 +134,7 @@ internal fun SelfModuleScreen(controlPlane: PluginControlPlaneFacade, onBack: ()
     var packagePick by remember { mutableStateOf<ModuleDocumentPick?>(null) }
     var exportPick by remember { mutableStateOf<ModuleDocumentPick?>(null) }
     val packages = remember { mutableMapOf<String, Uri>() }
+    val exportDocuments = remember { mutableMapOf<String, Uri>() }
     val packagePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         packagePick?.result?.complete(uri); packagePick = null
     }
@@ -143,7 +144,7 @@ internal fun SelfModuleScreen(controlPlane: PluginControlPlaneFacade, onBack: ()
     DisposableEffect(Unit) {
         onDispose {
             consent?.decision?.cancel(); packagePick?.result?.cancel(); exportPick?.result?.cancel()
-            packages.clear()
+            packages.clear(); exportDocuments.clear()
         }
     }
     consent?.let { pending ->
@@ -156,7 +157,7 @@ internal fun SelfModuleScreen(controlPlane: PluginControlPlaneFacade, onBack: ()
     suspend fun confirm(method: String, parameters: JSONObject): Boolean {
         check(consent == null) { "已有操作等待确认" }
         val decision = CompletableDeferred<Boolean>()
-        val label = when (method) { "submit", "request" -> "提交权限或操作申请"; "execute" -> "执行已获批准的操作"; "cancel_request" -> "取消待审批申请"; "copy" -> "复制模块内容到剪贴板"; else -> error("MODULE_METHOD_FORBIDDEN") }
+        val label = when (method) { "submit", "request" -> "提交权限或操作申请"; "execute" -> "执行已获批准的操作"; "cancel_request" -> "取消待审批申请"; "copy" -> "复制模块内容到剪贴板"; "upload_migration" -> "上传迁移登记；接收端确认后卸载源端模块，保留交接恢复资料"; else -> error("MODULE_METHOD_FORBIDDEN") }
         consent = ModuleConsent("$label\n${moduleOperationDescription(method, parameters)}", decision)
         try { return decision.await() } finally { if (consent?.decision === decision) consent = null }
     }
@@ -199,12 +200,12 @@ internal fun SelfModuleScreen(controlPlane: PluginControlPlaneFacade, onBack: ()
                             else {
                                 checkCurrent(binding)
                                 val token = UUID.randomUUID().toString()
-                                packages.clear(); packages[token] = uri
+                                packages.clear(); exportDocuments.clear(); packages[token] = uri
                                 JSONObject().put("success", true).put("package_token", token)
                             }
                         } finally { if (packagePick?.result === result) packagePick = null }
                     }
-                    "save_migration" -> {
+                    "choose_export", "save_migration" -> {
                         checkCurrent(binding)
                         check(exportPick == null) { "已有文件保存正在进行" }
                         val result = CompletableDeferred<Uri?>()
@@ -213,8 +214,31 @@ internal fun SelfModuleScreen(controlPlane: PluginControlPlaneFacade, onBack: ()
                         try {
                             val uri = result.await()
                             if (uri == null) JSONObject().put("success", true).put("cancelled", true)
-                            else { checkCurrent(binding); withContext(Dispatchers.IO) { controlPlane.selfCall("self_export_uri", JSONObject().put("uri", uri.toString())) } }
+                            else {
+                                checkCurrent(binding)
+                                context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                                if (method == "choose_export") {
+                                    val token = UUID.randomUUID().toString()
+                                    exportDocuments.clear(); exportDocuments[token] = uri
+                                    JSONObject().put("success", true).put("export_token", token)
+                                } else withContext(Dispatchers.IO) { controlPlane.selfCall("self_export_uri", JSONObject().put("uri", uri.toString())) }
+                            }
                         } finally { if (exportPick?.result === result) exportPick = null }
+                    }
+                    "upload_migration" -> {
+                        checkCurrent(binding)
+                        val endpoint = parameters.getString("endpoint").trim()
+                        MigrationRegistrationClient.validateEndpoint(endpoint)
+                        val descriptor = withContext(Dispatchers.IO) { controlPlane.selfCall("self_migration_registration") }
+                        check(descriptor.getString("identity_id") == binding.getString("identity_id") && descriptor.getBoolean("saved_export")) { "请先选择位置保存并校验迁移包" }
+                        val description = JSONObject().put("endpoint", endpoint).put("identity_id", descriptor.getString("identity_id"))
+                            .put("migration_id", descriptor.getString("migration_id")).put("package_sha256", descriptor.getString("package_sha256"))
+                        if (!confirm(method, description)) JSONObject().put("success", true).put("cancelled", true)
+                        else withContext(Dispatchers.IO) {
+                            // The page supplies neither registration contents nor a claimed success receipt.
+                            val receipt = MigrationRegistrationClient().upload(endpoint, parameters.optString("access_token"), descriptor)
+                            controlPlane.selfCall("self_complete_registration", JSONObject().put("receipt", receipt))
+                        }
                     }
                     "copy" -> {
                         checkCurrent(binding)
@@ -230,6 +254,19 @@ internal fun SelfModuleScreen(controlPlane: PluginControlPlaneFacade, onBack: ()
                         if (!confirm(method, parameters)) JSONObject().put("success", true).put("cancelled", true)
                         else {
                             val args = JSONObject(parameters.toString())
+                            val exportToken = args.optString("export_token")
+                            args.remove("export_token")
+                            if (exportToken.isNotEmpty()) {
+                                val uri = exportDocuments[exportToken] ?: error("请重新选择迁移包保存位置")
+                                fun attach(item: JSONObject) {
+                                    check(item.getString("operation") == "migrate" && item.getJSONObject("parameters").getString("phase") == "export") { "MODULE_EXPORT_OPERATION_INVALID" }
+                                    item.getJSONObject("parameters").put("export_uri", uri.toString())
+                                }
+                                if (method == "submit") {
+                                    val items = args.getJSONArray("items")
+                                    for (index in 0 until items.length()) if (items.getJSONObject(index).getString("operation") == "migrate") attach(items.getJSONObject(index))
+                                } else attach(args)
+                            }
                             val token = args.optString("package_token")
                             args.remove("package_token")
                             args.put("program_binding", binding)
@@ -254,7 +291,7 @@ private fun rejectModulePrivatePaths(value: Any, depth: Int = 0) {
     check(depth <= 24) { "MODULE_PAYLOAD_TOO_DEEP" }
     when (value) {
         is JSONObject -> value.keys().asSequence().forEach { key ->
-            check(key !in setOf("package_path", "uri", "program_binding")) { "MODULE_PRIVATE_PATH_FORBIDDEN" }
+            check(key !in setOf("package_path", "uri", "export_uri", "program_binding", "receipt_id", "source_uninstalled")) { "MODULE_PRIVATE_PATH_FORBIDDEN" }
             rejectModulePrivatePaths(value.get(key), depth + 1)
         }
         is JSONArray -> for (index in 0 until value.length()) rejectModulePrivatePaths(value.get(index), depth + 1)
@@ -285,7 +322,9 @@ private fun moduleOperationDescription(method: String, args: JSONObject): String
         }
         "request", "execute" -> operation(args)
         "cancel_request" -> "申请编号：${args.getString("request_id").take(80)}"
+        "upload_migration" -> "接收地址：${args.getString("endpoint")}\n身份：${args.getString("identity_id")}\n迁移编号：${args.getString("migration_id")}\n安装包 SHA-256：${args.getString("package_sha256")}\n仅上传登记元数据，不上传完整模块数据。"
         "copy" -> args.getString("text").take(4000)
         else -> error("MODULE_METHOD_FORBIDDEN")
-    } + if (args.has("package_token")) "\n使用系统文件选择器中选定的 .ails 包。" else ""
+    } + (if (args.has("package_token")) "\n使用系统文件选择器中选定的 .ails 包。" else "") +
+        (if (args.has("export_token")) "\n迁移包将保存到系统文件保存器中选定的位置。" else "")
 }

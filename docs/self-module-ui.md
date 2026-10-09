@@ -55,3 +55,7 @@ The user confirmed the 1.3.49 layout on device and requested extending the summa
 Narrow layouts keep their stacked controls and default summary height. All search, filtering, sorting and module-open callbacks are preserved. Module HTML and text stay inside .ails; this change only resizes its presentation container. Imported package candidates remain beneath the header controls.
 
 Only Plugin Center changes: version 1.3.50 (code 54). Base build116 and self module 0.1.3 remain unchanged. Diff checks passed; cloud compilation/rendering regressions and device layout verification for this revision remain pending.
+
+## 1.3.51 / module 0.1.4
+
+Native choose_export supplies a persisted SAF document token before migration approval. Host staging is exported and read back for SHA-256 verification. The module owns the endpoint form and upload action; Plugin Center supplies bounded HTTPS transport and native confirmation. Only a matching receiver acknowledgment triggers controlled source-slot retirement. Recovery continues the signed transfer from outgoing_migrations after uninstall. Endpoint tokens remain transient. The receiver database is outside scope. Existing offline WebView restrictions and authority checks remain unchanged. Cloud transport regressions use fake connections, never real self-module data.

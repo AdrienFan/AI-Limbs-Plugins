@@ -50,7 +50,7 @@ internal fun SelfModuleRecovery(controlPlane: PluginControlPlaneFacade, status: 
         }
     }
     fun operate(operation: String, parameters: JSONObject) {
-        val continuation = operation == "migrate" && module?.optBoolean("human_migration_authorized") == true &&
+        val continuation = operation == "migrate" && (if (parameters.has("migration_id")) status.optJSONArray("outgoing_migrations")?.let { array -> (0 until array.length()).map { array.getJSONObject(it) }.firstOrNull { it.getString("migration_id") == parameters.getString("migration_id") } else module)?.optBoolean("human_migration_authorized") == true &&
             parameters.optString("phase") in setOf("commit", "activate", "cancel", "discard")
         if (authorized(operation) || continuation) perform("self_execute", JSONObject().put("operation", operation).put("parameters", parameters))
         else perform("self_submit", JSONObject().put("mode", "ONE_TIME").put("reason", reason.trim())
@@ -88,6 +88,27 @@ internal fun SelfModuleRecovery(controlPlane: PluginControlPlaneFacade, status: 
         SelectionContainer { Text("本机交接标识：${status.optString("device_id")}\n" + (module?.let { "身份：${it.getString("identity_id")}\n版本：${it.getString("module_version")} · ${it.getString("lifecycle_state")}" } ?: "尚未安装")) }
         if (message.isNotEmpty()) Text(message)
         OutlinedTextField(value = reason, onValueChange = { reason = it.take(2000) }, label = { Text("无持续授权时的申请理由") }, modifier = Modifier.fillMaxWidth())
+        val transfers = status.optJSONArray("outgoing_migrations") ?: JSONArray()
+        for (index in 0 until transfers.length()) {
+            val transfer = transfers.getJSONObject(index)
+            val migrationId = transfer.getString("migration_id")
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("已卸载源端模块的迁移交接", style = MaterialTheme.typography.titleMedium)
+                    SelectionContainer { Text("身份：${transfer.getString("identity_id")}\n迁移编号：$migrationId\n安装槽位已释放，迁移包和恢复资料仍保留。") }
+                    if (transfer.optBoolean("transfer_committed")) {
+                        OutlinedButton(enabled = !busy, onClick = { copy(transfer.getJSONObject("release")) }) { Text("复制运行权交接凭据") }
+                    } else {
+                        OutlinedTextField(value = evidence, onValueChange = { evidence = it }, label = { Text("目标设备接收凭据") }, modifier = Modifier.fillMaxWidth())
+                        Button(enabled = !busy && evidence.isNotBlank(), onClick = {
+                            runCatching { JSONObject(evidence) }.onSuccess { operate("migrate", JSONObject().put("phase", "commit").put("migration_id", migrationId).put("receipt", it)) }
+                                .onFailure { message = "凭据格式无效" }
+                        }) { Text("完成运行权交接") }
+                        OutlinedButton(enabled = !busy && module == null, onClick = { operate("migrate", JSONObject().put("phase", "cancel").put("migration_id", migrationId)) }) { Text("取消未交接迁移并恢复源端模块") }
+                    }
+                }
+            }
+        }
         if (module == null) {
             Button(enabled = !busy, onClick = { pickerCommand = "install"; picker.launch(arrayOf("*/*")) }) { Text("选择 .ails 并首次安装") }
             OutlinedButton(enabled = !busy && reason.isNotBlank(), onClick = { pickerCommand = "prepare"; picker.launch(arrayOf("*/*")) }) { Text("选择迁移包并申请迁入") }
