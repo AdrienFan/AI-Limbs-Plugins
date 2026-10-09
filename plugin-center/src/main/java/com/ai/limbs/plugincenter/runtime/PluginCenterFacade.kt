@@ -32,6 +32,11 @@ internal class PluginControlPlaneFacade(
     @Volatile private var cachedInactivity = PluginInactivityPolicySnapshot(false, InactivityThresholdMode.DAYS, 30, 10, 0L)
     @Volatile private var cachedBackupPolicy = PluginBackupPolicySnapshot(false)
 
+    suspend fun selfCall(operation: String, args: JSONObject = JSONObject()): JSONObject {
+        val result = service.call(operation, args)
+        check(result.optBoolean("success", false)) { result.optString("error", "自我模块操作失败") }
+        return result
+    }
     fun developerModeEnabled(): Boolean = host.pluginPlatform.developerModeEnabled()
     fun developerDiscoveryEnabled(): Boolean = host.pluginPlatform.developerDiscoveryEnabled()
 

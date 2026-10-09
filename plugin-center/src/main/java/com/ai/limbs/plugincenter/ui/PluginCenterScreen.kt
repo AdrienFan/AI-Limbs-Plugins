@@ -168,6 +168,7 @@ fun PluginCenterScreen(
     var uninstallTargetId by remember { mutableStateOf<String?>(null) }
     var uninstallChildTarget by remember { mutableStateOf<ChildExtensionSummary?>(null) }
     var childUpgradeTarget by remember { mutableStateOf<ChildExtensionSummary?>(null) }
+    var showSelfModule by remember { mutableStateOf(false) }
     var showAdminSettings by remember { mutableStateOf(false) }
     var pendingAdminAction by remember { mutableStateOf<AdminAction?>(null) }
     var showAdminSetup by remember { mutableStateOf(false) }
@@ -431,7 +432,9 @@ fun PluginCenterScreen(
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             val selected = snapshots.firstOrNull { it.plugin.pluginId == selectedPluginId }
             val selectedChild = childInventory.extensions.firstOrNull { it.extensionId == selectedChildId }
-            if (showAdminSettings) {
+            if (showSelfModule) {
+                SelfModuleScreen(controlPlane, onBack = { showSelfModule = false })
+            } else if (showAdminSettings) {
                 PluginAdminSecurityScreen(
                     controlPlane = controlPlane,
                     adminSecurity = adminSecurity,
@@ -511,6 +514,7 @@ fun PluginCenterScreen(
                     session = homeSession,
                     listState = homeListState,
                     onOpenSettings = { requestAdmin(AdminAction.OpenSettings) },
+                    onOpenSelfModule = { showSelfModule = true },
                     onChoose = { choosePlugin() },
                     onClearCandidates = { candidates = emptyList() },
                     onRemoveCandidate = { target ->
@@ -735,6 +739,7 @@ private fun PluginCenterHome(
     session: PluginCenterHomeSessionState,
     listState: androidx.compose.foundation.lazy.LazyListState,
     onOpenSettings: () -> Unit,
+    onOpenSelfModule: () -> Unit,
     onChoose: () -> Unit,
     onInstall: () -> Unit,
     onClearCandidates: () -> Unit,
@@ -847,6 +852,7 @@ private fun PluginCenterHome(
                         failed = snapshots.count { pluginStatusLight(it) == PluginStatusLight.RED },
                         disabled = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GRAY }
                     )
+                    OutlinedButton(onClick = onOpenSelfModule, enabled = !busy) { Text("空白自我模块 · .ails") }
                     Button(onClick = onChoose, enabled = !busy) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.size(6.dp))
