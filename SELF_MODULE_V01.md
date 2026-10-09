@@ -1,5 +1,9 @@
-自我模块 V0.1 总控台配套改动
+# Self Module control plane — 1.3.42 / code46
 
-版本准备：1.3.41，versionCode45。新增独立 .ails 页面和人类申请入口，沿用 Host SAF 暂存通道。审批及执行由基座专属生命周期管理。
+The special .ails module appears in its own summary card with current effective authorization. Details contain actual grants/expiry, a collapsible multiselect application form, explicit authorized operations and per-item approval history.
 
-尚未推送、编译或实机验收，等待用户追加内容。详细规范见基座 docs/TODO/self-module-v01/index.md。
+ONE_TIME binds exact package/version/migration target and is executed upon AI approval. TIMED/LONG creates one independent request per selected function with a shared batch ID and human reason. AI can reject individual items and shorten duration; the approval result controls effective authority. Duration begins at approval. Existing applications never execute automatically when a persistent grant is enabled.
+
+The UI can view/request/cancel and use existing grants. It cannot approve or revoke grants. Host admission, one-slot lifecycle, signed migration handoff and trusted AI review remain in the paired base build115.
+
+Cloud build only. The APK is a payload for a signed .ailpsys package, not a standalone app to install directly. Host and Resident device acceptance is still required after compilation.

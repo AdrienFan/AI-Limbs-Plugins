@@ -501,6 +501,7 @@ fun PluginCenterScreen(
                 )
             } else {
                 PluginCenterHome(
+                    controlPlane = controlPlane,
                     snapshots = snapshots,
                     childInventory = childInventory,
                     uiContributions = uiContributions,
@@ -729,6 +730,7 @@ fun PluginCenterScreen(
 }
 @Composable
 private fun PluginCenterHome(
+    controlPlane: PluginControlPlaneFacade,
     snapshots: List<PluginControlSnapshot>,
     childInventory: ChildExtensionInventory,
     uiContributions: List<PluginUiContributionSnapshot>,
@@ -852,7 +854,7 @@ private fun PluginCenterHome(
                         failed = snapshots.count { pluginStatusLight(it) == PluginStatusLight.RED },
                         disabled = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GRAY }
                     )
-                    OutlinedButton(onClick = onOpenSelfModule, enabled = !busy) { Text("空白自我模块 · .ails") }
+                    SelfModuleSummary(controlPlane, !busy, onOpenSelfModule)
                     Button(onClick = onChoose, enabled = !busy) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.size(6.dp))
