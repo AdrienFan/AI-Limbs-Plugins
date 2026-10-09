@@ -860,22 +860,34 @@ private fun PluginCenterHome(
                     )
                     BoxWithConstraints(Modifier.fillMaxWidth()) {
                         val wide = maxWidth >= 400.dp * LocalDensity.current.fontScale
-                        @Composable fun AddPluginControl() {
-                            Button(onClick = onChoose, enabled = !busy) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(Modifier.size(6.dp))
-                                Text("添加插件")
+                        @Composable fun ImportAndSearchControls(modifier: Modifier = Modifier) {
+                            Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Button(onClick = onChoose, enabled = !busy) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.size(6.dp))
+                                    Text("添加插件")
+                                }
+                                PluginSearchField(
+                                    input = session.searchInput,
+                                    appliedQuery = session.appliedQuery,
+                                    onInputChange = { session.searchInput = it },
+                                    onApplySearch = { session.appliedQuery = session.searchInput.trim() },
+                                    onClearSearch = {
+                                        session.searchInput = ""
+                                        session.appliedQuery = ""
+                                    }
+                                )
                             }
                         }
                         if (wide) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically) {
-                                AddPluginControl()
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                verticalAlignment = Alignment.Top) {
+                                ImportAndSearchControls(Modifier.weight(1f))
                                 SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule)
                             }
                         } else {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                AddPluginControl()
+                                ImportAndSearchControls(Modifier.fillMaxWidth())
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule)
                                 }
@@ -893,20 +905,12 @@ private fun PluginCenterHome(
                 }
             }
             item(key = "plugin-search-sort") {
-                PluginSearchSortControls(
-                    input = session.searchInput,
-                    appliedQuery = session.appliedQuery,
+                PluginFilterSortControls(
                     sortMode = session.sortMode,
                     pageFilterOptions = pageFilterOptions,
                     selectedPageFilterIds = selectedPageFilterIds,
                     statusFilterOptions = statusFilterOptions,
                     selectedStatusFilterIds = selectedStatusFilterIds,
-                    onInputChange = { session.searchInput = it },
-                    onApplySearch = { session.appliedQuery = session.searchInput.trim() },
-                    onClearSearch = {
-                        session.searchInput = ""
-                        session.appliedQuery = ""
-                    },
                     onPageFilterChange = { session.selectedPageFilterIds = it },
                     onStatusFilterChange = { session.selectedStatusFilterIds = it },
                     onSortModeChange = { session.sortMode = it }

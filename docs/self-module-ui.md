@@ -39,3 +39,11 @@ Run 37902138870 completed successfully with the four required Android rendering 
 The five inventory counts now use the full header width before the action row, so the self-module tile cannot force the disabled count to wrap. The action row places Add Plugin on the left and the unchanged module-owned summary on the right; narrow widths and larger fonts retain wrapping. The native Host Recovery link is removed from the normal module page. Missing resources and rendering failures still reach the independent recovery surface automatically.
 
 Only Plugin Center changes: version 1.3.48 (code 52). The base remains build116 and self module remains 0.1.3. No lifecycle, authorization, module HTML or bridge behavior changes. Cloud validation and device verification of this placement revision are pending.
+
+## 1.3.49 compact import/search column
+
+The user confirmed the 1.3.48 device layout and requested removing the large empty bands above and below Add Plugin. The full-width inventory count row remains first. Below it, Add Plugin and the search field form one left column with a 6dp gap, top-aligned beside the unchanged module-owned summary. The search field now uses the left column's width. Page/status filters and sorting remain full-width below this header; narrow widths and larger font scales stack the tile below the controls.
+
+Search input, applied query, keyboard submission, clear/focus handling and all filter/sort callbacks are preserved while their presentation components are split. Imported package candidates remain visible before the filter row. Module HTML, dimensions, lifecycle and permissions are unchanged.
+
+Only Plugin Center changes: 1.3.49 (code 53). Base build116 and independently packaged self module 0.1.3 remain unchanged. Diff checks passed; cloud compilation/rendering regressions and device layout verification for this revision are pending.

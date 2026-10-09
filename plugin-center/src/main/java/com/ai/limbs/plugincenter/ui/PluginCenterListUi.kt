@@ -120,56 +120,61 @@ internal fun usageSummary(snapshot: PluginControlSnapshot): String {
 }
 
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun PluginSearchSortControls(
+internal fun PluginSearchField(
     input: String,
     appliedQuery: String,
+    onInputChange: (String) -> Unit,
+    onApplySearch: () -> Unit,
+    onClearSearch: () -> Unit
+) {
+    val focusManager = LocalFocusManager.current
+    OutlinedTextField(
+        value = input,
+        onValueChange = onInputChange,
+        placeholder = { Text("搜索名称、ID 或能力") },
+        shape = RoundedCornerShape(16.dp),
+        trailingIcon = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (input.isNotBlank() || appliedQuery.isNotBlank()) {
+                    IconButton(onClick = {
+                        onClearSearch()
+                        focusManager.clearFocus()
+                    }) { Icon(Icons.Default.Close, contentDescription = "清除搜索") }
+                }
+                IconButton(onClick = {
+                    onApplySearch()
+                    focusManager.clearFocus()
+                }) { Icon(Icons.Default.Search, contentDescription = "执行搜索") }
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        keyboardActions = KeyboardActions(onSearch = {
+            onApplySearch()
+            focusManager.clearFocus()
+        })
+    )
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun PluginFilterSortControls(
     sortMode: PluginSortMode,
     pageFilterOptions: List<PluginPageFilterOption>,
     selectedPageFilterIds: Set<String>,
     statusFilterOptions: List<PluginStatusFilterOption>,
     selectedStatusFilterIds: Set<String>,
-    onInputChange: (String) -> Unit,
-    onApplySearch: () -> Unit,
-    onClearSearch: () -> Unit,
     onPageFilterChange: (Set<String>) -> Unit,
     onStatusFilterChange: (Set<String>) -> Unit,
     onSortModeChange: (PluginSortMode) -> Unit
 ) {
-    val focusManager = LocalFocusManager.current
     var pageFilterExpanded by remember { mutableStateOf(false) }
     val pageFilterScrollState = rememberScrollState()
     var statusFilterExpanded by remember { mutableStateOf(false) }
     var sortExpanded by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(
-            value = input,
-            onValueChange = onInputChange,
-            placeholder = { Text("搜索名称、ID 或能力") },
-            shape = RoundedCornerShape(16.dp),
-            trailingIcon = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (input.isNotBlank() || appliedQuery.isNotBlank()) {
-                        IconButton(onClick = {
-                            onClearSearch()
-                            focusManager.clearFocus()
-                        }) { Icon(Icons.Default.Close, contentDescription = "清除搜索") }
-                    }
-                    IconButton(onClick = {
-                        onApplySearch()
-                        focusManager.clearFocus()
-                    }) { Icon(Icons.Default.Search, contentDescription = "执行搜索") }
-                }
-            },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = {
-                onApplySearch()
-                focusManager.clearFocus()
-            })
-        )
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
