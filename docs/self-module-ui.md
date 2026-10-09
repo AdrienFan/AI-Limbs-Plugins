@@ -15,3 +15,11 @@ Source review and syntax checks are the current verification stage. Cloud compil
 Module HTML now loads through a single Base64 memory document. The synthetic HTTPS load path is removed; network, file/content reads, external resource requests and navigation remain blocked. Main-frame HTTP errors are now also reported, and the JS transport uses a JVM-visible class. Ownership remains unchanged: the module supplies both UI documents, the container supplies transport and placement.
 
 Three Android WebView instrumentation regressions read the actual module pages from the selected source revision during cloud checkout. They check management/form/ongoing grants, unapproved-action visibility and compact state display. Independent module packaging supplies 0.1.3 through its own workflow. These are prepared tests; cloud and device results must be recorded before claiming a working repair.
+
+## 1.3.46 rendering-test classpath repair
+
+Cloud run 37897731633 assembled the production APK successfully, then failed at compileDebugAndroidTestKotlin: Compose runtime was absent from the instrumentation compiler classpath. No page-rendering assertions ran, and the verified APK upload was skipped.
+
+The instrumentation configuration now declares the same Compose BOM and its runtime explicitly. Production dependencies remain compileOnly so the system-plugin payload continues using host-provided Compose. Both APKs assemble before the emulator starts. The offscreen test bridge dispatches on the main looper rather than waiting for an unattached View.post queue, and signals status only after JavaScript delivery completes.
+
+All three actual-module rendering checks remain required. Version is 1.3.46 (code 50); base build116 and independently packaged self module 0.1.3 are unchanged. Cloud compile and Android rendering verification are pending for this correction; device visual verification remains pending.

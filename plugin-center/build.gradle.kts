@@ -13,8 +13,8 @@ android {
         minSdk = 26
         targetSdk = 34
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        versionCode = 49
-        versionName = "1.3.45"
+        versionCode = 50
+        versionName = "1.3.46"
     }
 
     compileOptions {
@@ -36,6 +36,10 @@ android {
 }
 
 dependencies {
+    // Production uses host-provided Compose through compileOnly; the test APK
+    // needs its own runtime on the Compose compiler classpath.
+    androidTestImplementation(platform("androidx.compose:compose-bom:2026.02.01"))
+    androidTestImplementation("androidx.compose.runtime:runtime")
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     compileOnly(project(":system-sdk-stubs"))

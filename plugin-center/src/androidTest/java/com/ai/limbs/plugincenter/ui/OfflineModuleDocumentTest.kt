@@ -1,5 +1,7 @@
 package com.ai.limbs.plugincenter.ui
 
+import android.os.Handler
+import android.os.Looper
 import android.webkit.WebView
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -74,9 +76,12 @@ class OfflineModuleDocumentTest {
                 if (method !in setOf("__ready", "status")) error.set("Unexpected page operation: " + method)
                 val response = if (method == "status") snapshot else JSONObject().put("success", true)
                 val reply = JSONObject().put("id", envelope.getString("id")).put("response", response).toString()
-                view.post {
-                    view.evaluateJavascript("window.ailsReceive(" + JSONObject.quote(reply) + ");", null)
-                    if (method == "status") started.countDown()
+                // This test WebView is intentionally offscreen. View.post waits
+                // for attachment, so dispatch directly to the main looper.
+                Handler(Looper.getMainLooper()).post {
+                    view.evaluateJavascript("window.ailsReceive(" + JSONObject.quote(reply) + ");") {
+                        if (method == "status") started.countDown()
+                    }
                 }
             }, "AilsTransport")
             OfflineModuleDocument.load(view, html, 1f) { error.set(it); started.countDown() }

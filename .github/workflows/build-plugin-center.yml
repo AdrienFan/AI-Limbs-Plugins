@@ -39,10 +39,10 @@ jobs:
           packages: platform-tools
       - name: Install Android 36 platform
         run: sdkmanager "platforms;android-36"
-      - name: Build plugin-center APK
+      - name: Build plugin-center and rendering-test APKs
         run: |
           chmod +x gradlew
-          ./gradlew :plugin-center:assembleDebug --no-daemon --stacktrace
+          ./gradlew :plugin-center:assembleDebug :plugin-center:assembleDebugAndroidTest --no-daemon --stacktrace
       - name: Enable emulator KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
