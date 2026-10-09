@@ -12,8 +12,9 @@ android {
         applicationId = "com.ai.limbs.plugincenter.system.v1322"
         minSdk = 26
         targetSdk = 34
-        versionCode = 48
-        versionName = "1.3.44"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = 49
+        versionName = "1.3.45"
     }
 
     compileOptions {
@@ -35,6 +36,8 @@ android {
 }
 
 dependencies {
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     compileOnly(project(":system-sdk-stubs"))
     compileOnly(platform("androidx.compose:compose-bom:2026.02.01"))
     compileOnly("androidx.compose.ui:ui")

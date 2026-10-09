@@ -2,37 +2,69 @@ name: Build Plugin Center
 
 on:
   workflow_dispatch:
+    inputs:
+      self_module_ref:
+        description: Self module source revision for actual page rendering checks
+        required: true
+        default: feat/visual-permission-lifecycle
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
+      - name: Checkout module-owned UI fixtures
+        uses: actions/checkout@v4
+        with:
+          repository: AdrienFan/AI-Limbs-Public-Build
+          ref: ${{ inputs.self_module_ref }}
+          path: .self-module-fixtures
+          sparse-checkout: self-module/ui
+      - name: Stage actual module pages for Android rendering tests
+        run: |
+          mkdir -p plugin-center/src/androidTest/assets/self-module
+          cp .self-module-fixtures/self-module/ui/*.html plugin-center/src/androidTest/assets/self-module/
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-
       - name: Install Android 36 platform
         run: sdkmanager "platforms;android-36"
-
       - name: Build plugin-center APK
         run: |
           chmod +x gradlew
           ./gradlew :plugin-center:assembleDebug --no-daemon --stacktrace
-
-      - name: Upload APK
+      - name: Enable emulator KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Check real offline module rendering on Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: ./gradlew :plugin-center:connectedDebugAndroidTest --no-daemon --stacktrace
+      - name: Upload Android rendering reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-center-rendering-reports
+          path: plugin-center/build/reports/androidTests/**
+          if-no-files-found: warn
+      - name: Upload verified APK
         uses: actions/upload-artifact@v4
         with:
           name: plugin-center-debug
