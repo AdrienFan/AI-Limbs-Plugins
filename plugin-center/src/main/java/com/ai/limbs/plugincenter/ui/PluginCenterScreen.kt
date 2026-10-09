@@ -64,6 +64,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -765,6 +766,7 @@ private fun PluginCenterHome(
     onJumpChild: (ChildExtensionSummary) -> Unit,
     onUninstallChild: (ChildExtensionSummary) -> Unit
 ) {
+    val selfPresentation = rememberSelfModulePresentation(controlPlane)
     val dependencySummaries = remember(snapshots, childInventory) {
         snapshots.associate { it.plugin.pluginId to dependencySummary(it, snapshots, childInventory) }
     }
@@ -849,18 +851,37 @@ private fun PluginCenterHome(
                             Icon(Icons.Default.Settings, contentDescription = "管理员安全与开发设置")
                         }
                     }
-                    ConsoleOverview(
-                        total = snapshots.size,
-                        running = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GREEN },
-                        attention = snapshots.count { pluginStatusLight(it) == PluginStatusLight.YELLOW },
-                        failed = snapshots.count { pluginStatusLight(it) == PluginStatusLight.RED },
-                        disabled = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GRAY }
-                    )
-                    SelfModuleSummary(controlPlane, !busy, onOpenSelfModule)
-                    Button(onClick = onChoose, enabled = !busy) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.size(6.dp))
-                        Text("添加插件")
+                    BoxWithConstraints(Modifier.fillMaxWidth()) {
+                        val wide = maxWidth >= 400.dp * LocalDensity.current.fontScale
+                        @Composable fun InventoryControls() {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                ConsoleOverview(
+                                    total = snapshots.size,
+                                    running = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GREEN },
+                                    attention = snapshots.count { pluginStatusLight(it) == PluginStatusLight.YELLOW },
+                                    failed = snapshots.count { pluginStatusLight(it) == PluginStatusLight.RED },
+                                    disabled = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GRAY }
+                                )
+                                Button(onClick = onChoose, enabled = !busy) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                    Spacer(Modifier.size(6.dp))
+                                    Text("添加插件")
+                                }
+                            }
+                        }
+                        if (wide) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Box(Modifier.weight(1f)) { InventoryControls() }
+                                SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule)
+                            }
+                        } else {
+                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                InventoryControls()
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule)
+                                }
+                            }
+                        }
                     }
                 }
             }

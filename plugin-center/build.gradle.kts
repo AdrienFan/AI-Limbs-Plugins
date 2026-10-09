@@ -12,8 +12,8 @@ android {
         applicationId = "com.ai.limbs.plugincenter.system.v1322"
         minSdk = 26
         targetSdk = 34
-        versionCode = 47
-        versionName = "1.3.43"
+        versionCode = 48
+        versionName = "1.3.44"
     }
 
     compileOptions {
