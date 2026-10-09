@@ -23,3 +23,11 @@ Cloud run 37897731633 assembled the production APK successfully, then failed at 
 The instrumentation configuration now declares the same Compose BOM and its runtime explicitly. Production dependencies remain compileOnly so the system-plugin payload continues using host-provided Compose. Both APKs assemble before the emulator starts. The offscreen test bridge dispatches on the main looper rather than waiting for an unattached View.post queue, and signals status only after JavaScript delivery completes.
 
 All three actual-module rendering checks remain required. Version is 1.3.46 (code 50); base build116 and independently packaged self module 0.1.3 are unchanged. Cloud compile and Android rendering verification are pending for this correction; device visual verification remains pending.
+
+## 1.3.47 exact memory-document admission
+
+Cloud run 37899982022 compiled both APKs and executed all three rendering tests. All three failed with a main-frame HTTP 403 produced by the renderer's unconditional shouldInterceptRequest response. Android invokes this callback for data URLs as well as network requests, so replacing HTTPS with loadData alone did not repair the document admission.
+
+The renderer now constructs one explicit UTF-8 Base64 data URL and loads that exact URL. Only its top-level GET receives the platform's normal in-memory loading path. Other URLs, subframes and methods still receive 403; page navigation, networking, file/content access and persistence remain blocked. The module continues owning its HTML, and no base or module program code changes are required.
+
+The three real-page checks remain unchanged. A fourth boundary test loads the real summary then checks that only the current document is admitted, while unrelated data, HTTP(S), file/content, subframe and POST requests remain blocked. Total required cloud tests: four. Center 1.3.47 (code 51) cloud validation is pending; device layout verification remains pending. Base remains build116 and self module remains independently packaged 0.1.3.

@@ -1,5 +1,7 @@
 package com.ai.limbs.plugincenter.ui
 
+import android.net.Uri
+import android.webkit.WebResourceRequest
 import android.os.Handler
 import android.os.Looper
 import android.webkit.WebView
@@ -55,6 +57,33 @@ class OfflineModuleDocumentTest {
             assertEquals("运行中", result.getString("state"))
             assertTrue(result.getString("manage").contains("管理"))
         }
+    }
+    @Test fun rendererOnlyAdmitsItsOwnTopLevelMemoryDocument() {
+        render("summary.html", false) { view, _ ->
+            InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                val document = requireNotNull(view.url)
+                assertTrue(document.startsWith("data:text/html;charset=utf-8;base64,"))
+                val client = view.webViewClient
+                assertNull(client.shouldInterceptRequest(view, resourceRequest(document, true)))
+                for (url in listOf("https://example.invalid/page", "http://example.invalid/page", "file:///sdcard/Download/test.html", "content://test/page", "data:text/html;base64,PGgxPnRlc3Q8L2gxPg==")) {
+                    assertEquals(403, client.shouldInterceptRequest(view, resourceRequest(url, true))!!.statusCode)
+                    assertTrue(client.shouldOverrideUrlLoading(view, resourceRequest(url, true)))
+                }
+                assertEquals(403, client.shouldInterceptRequest(view, resourceRequest(document, false))!!.statusCode)
+                assertEquals(403, client.shouldInterceptRequest(view, resourceRequest(document, true, "POST"))!!.statusCode)
+                assertFalse(view.settings.allowContentAccess)
+                assertFalse(view.settings.domStorageEnabled)
+                assertTrue(view.settings.blockNetworkLoads)
+            }
+        }
+    }
+    private fun resourceRequest(url: String, mainFrame: Boolean, method: String = "GET") = object : WebResourceRequest {
+        override fun getUrl() = Uri.parse(url)
+        override fun isForMainFrame() = mainFrame
+        override fun isRedirect() = false
+        override fun hasGesture() = false
+        override fun getMethod() = method
+        override fun getRequestHeaders(): Map<String, String> = emptyMap()
     }
     private fun render(name: String, approved: Boolean, check: (WebView, (String) -> JSONObject) -> Unit) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

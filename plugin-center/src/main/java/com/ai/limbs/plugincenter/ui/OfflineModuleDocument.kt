@@ -38,10 +38,16 @@ internal object OfflineModuleDocument {
             setSupportMultipleWindows(false)
             javaScriptCanOpenWindowsAutomatically = false
         }
+        // Interception also receives data: URLs, including the top-level
+        // memory document. Authorize this exact document, not an entire scheme.
+        val encoded = Base64.encodeToString(secured.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+        val documentUrl = "data:text/html;charset=utf-8;base64,$encoded"
         view.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest) = true
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest) =
-                WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                if (request.isForMainFrame && request.method == "GET" && request.url.toString() == documentUrl) return null
+                return WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))
+            }
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame) onFailure("模块页面加载失败：" + error.errorCode + " · " + error.description)
             }
@@ -53,9 +59,8 @@ internal object OfflineModuleDocument {
                 return true
             }
         }
-        // Base64 preserves Chinese, #, %, CSS and JS without HTTP/cache requests to a synthetic URL.
-        val encoded = Base64.encodeToString(secured.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
-        view.loadData(encoded, "text/html", "base64")
+        // Explicit charset and exact URL keep Chinese intact and admission deterministic.
+        view.loadUrl(documentUrl)
     }
 }
 
