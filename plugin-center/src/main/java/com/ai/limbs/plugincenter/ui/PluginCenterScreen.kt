@@ -879,15 +879,34 @@ private fun PluginCenterHome(
                                 )
                             }
                         }
+                        @Composable fun InventoryLeftControls(modifier: Modifier = Modifier) {
+                            Column(modifier, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                                ImportAndSearchControls(Modifier.fillMaxWidth())
+                                PluginFilterSortControls(
+                                    sortMode = session.sortMode,
+                                    pageFilterOptions = pageFilterOptions,
+                                    selectedPageFilterIds = selectedPageFilterIds,
+                                    statusFilterOptions = statusFilterOptions,
+                                    selectedStatusFilterIds = selectedStatusFilterIds,
+                                    onPageFilterChange = { session.selectedPageFilterIds = it },
+                                    onStatusFilterChange = { session.selectedStatusFilterIds = it },
+                                    onSortModeChange = { session.sortMode = it }
+                                )
+                            }
+                        }
                         if (wide) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.Top) {
-                                ImportAndSearchControls(Modifier.weight(1f))
-                                SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule)
+                            val tileWidth = 128.dp * LocalDensity.current.fontScale
+                            Box(Modifier.fillMaxWidth()) {
+                                // Only the left controls determine height. The tile fills
+                                // that measured height without stretching this header.
+                                InventoryLeftControls(Modifier.fillMaxWidth().padding(end = tileWidth + 12.dp))
+                                Row(Modifier.matchParentSize(), horizontalArrangement = Arrangement.End) {
+                                    SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule, fillHeight = true)
+                                }
                             }
                         } else {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                ImportAndSearchControls(Modifier.fillMaxWidth())
+                                InventoryLeftControls(Modifier.fillMaxWidth())
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule)
                                 }
@@ -903,18 +922,6 @@ private fun PluginCenterHome(
                         onInstall = onInstall, onClear = onClearCandidates, onRemove = onRemoveCandidate
                     )
                 }
-            }
-            item(key = "plugin-search-sort") {
-                PluginFilterSortControls(
-                    sortMode = session.sortMode,
-                    pageFilterOptions = pageFilterOptions,
-                    selectedPageFilterIds = selectedPageFilterIds,
-                    statusFilterOptions = statusFilterOptions,
-                    selectedStatusFilterIds = selectedStatusFilterIds,
-                    onPageFilterChange = { session.selectedPageFilterIds = it },
-                    onStatusFilterChange = { session.selectedStatusFilterIds = it },
-                    onSortModeChange = { session.sortMode = it }
-                )
             }
 
             item(key = "system-header") {

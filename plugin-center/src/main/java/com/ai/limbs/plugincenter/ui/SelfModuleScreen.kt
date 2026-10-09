@@ -88,9 +88,12 @@ internal fun rememberSelfModulePresentation(controlPlane: PluginControlPlaneFaca
 
 /** Placement belongs to Plugin Center; the tile's content/style comes from the active .ails. */
 @Composable
-internal fun SelfModuleSummary(state: SelfModulePresentationState, enabled: Boolean, onOpen: () -> Unit) {
+internal fun SelfModuleSummary(
+    state: SelfModulePresentationState, enabled: Boolean, onOpen: () -> Unit, fillHeight: Boolean = false
+) {
     val fontScale = LocalDensity.current.fontScale
-    Card(Modifier.width(128.dp * fontScale).height(104.dp * fontScale)) {
+    val height = if (fillHeight) Modifier.fillMaxHeight() else Modifier.height(104.dp * fontScale)
+    Card(Modifier.width(128.dp * fontScale).then(height)) {
         Box(Modifier.fillMaxSize()) {
             val document = state.document
             if (document != null && state.renderError == null && state.error == null) {

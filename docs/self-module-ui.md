@@ -47,3 +47,11 @@ The user confirmed the 1.3.48 device layout and requested removing the large emp
 Search input, applied query, keyboard submission, clear/focus handling and all filter/sort callbacks are preserved while their presentation components are split. Imported package candidates remain visible before the filter row. Module HTML, dimensions, lifecycle and permissions are unchanged.
 
 Only Plugin Center changes: 1.3.49 (code 53). Base build116 and independently packaged self module 0.1.3 remain unchanged. Diff checks passed; cloud compilation/rendering regressions and device layout verification for this revision are pending.
+
+## 1.3.50 summary height follows the complete control column
+
+The user confirmed the 1.3.49 layout on device and requested extending the summary through the empty region beside the filter row. On wide layouts, the left column now contains Add Plugin, search and filter/sort controls. It determines the header height; a matchParentSize layer places the summary at the right and fills that measured height. The card bottom aligns with the filter row bottom, retaining the normal 14dp separation before the plugin section or import candidates. The tile cannot inflate the measured header or overlap the left controls.
+
+Narrow layouts keep their stacked controls and default summary height. All search, filtering, sorting and module-open callbacks are preserved. Module HTML and text stay inside .ails; this change only resizes its presentation container. Imported package candidates remain beneath the header controls.
+
+Only Plugin Center changes: version 1.3.50 (code 54). Base build116 and self module 0.1.3 remain unchanged. Diff checks passed; cloud compilation/rendering regressions and device layout verification for this revision remain pending.
