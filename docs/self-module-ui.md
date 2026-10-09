@@ -4,7 +4,7 @@ Plugin Center no longer owns the full self-module management page or compact ent
 
 ModuleHtmlView is an offline page renderer without lifecycle semantics. SelfModuleScreen is the self control-plane adapter: it allows read/status, human request/submit/execute/cancel, explicit SAF package selection/export and clipboard transport. It has no AI review or autonomous interface. Native confirmation displays actual page write requests. Private paths, SAF URIs and authority bindings are supplied by the host adapter, never by page parameters.
 
-The full-width old summary and hardcoded approval form/history are removed. Labels, multi-select request form, timing, lifecycle interaction and history presentation now ship inside .ails. An existing 0.1.1 package without HTML shows an explicit unavailable message and the separate native recovery surface. The native recovery entry is always accessible and preserves the existing AI authorization and signed migration checks.
+The full-width old summary and hardcoded approval form/history are removed. Labels, multi-select request form, timing, lifecycle interaction and history presentation now ship inside .ails. An existing 0.1.1 package without HTML shows an explicit unavailable message and the separate native recovery surface. Native recovery is provided when the module is missing or its presentation fails, preserving the existing AI authorization and signed migration checks.
 
 Requires base build116 for generic resource reads and resource-bearing .ails admission, and blank module 0.1.2 for the first package-owned UI. It adds no ordinary-plugin/child runtime changes or new ABI classes. Payload applicationId is unchanged; .ailpsys is a system-plugin update rather than a standalone comparison app.
 
@@ -31,3 +31,11 @@ Cloud run 37899982022 compiled both APKs and executed all three rendering tests.
 The renderer now constructs one explicit UTF-8 Base64 data URL and loads that exact URL. Only its top-level GET receives the platform's normal in-memory loading path. Other URLs, subframes and methods still receive 403; page navigation, networking, file/content access and persistence remain blocked. The module continues owning its HTML, and no base or module program code changes are required.
 
 The three real-page checks remain unchanged. A fourth boundary test loads the real summary then checks that only the current document is admitted, while unrelated data, HTTP(S), file/content, subframe and POST requests remain blocked. Total required cloud tests: four. Center 1.3.47 (code 51) cloud validation is pending; device layout verification remains pending. Base remains build116 and self module remains independently packaged 0.1.3.
+
+## 1.3.48 console placement and normal-page cleanup
+
+Run 37902138870 completed successfully with the four required Android rendering checks. The user's device screenshots confirmed a working module-owned management page and summary with self module 0.1.3.
+
+The five inventory counts now use the full header width before the action row, so the self-module tile cannot force the disabled count to wrap. The action row places Add Plugin on the left and the unchanged module-owned summary on the right; narrow widths and larger fonts retain wrapping. The native Host Recovery link is removed from the normal module page. Missing resources and rendering failures still reach the independent recovery surface automatically.
+
+Only Plugin Center changes: version 1.3.48 (code 52). The base remains build116 and self module remains 0.1.3. No lifecycle, authorization, module HTML or bridge behavior changes. Cloud validation and device verification of this placement revision are pending.

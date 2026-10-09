@@ -127,7 +127,6 @@ private class ModuleDocumentPick(val result: CompletableDeferred<Uri?>)
 internal fun SelfModuleScreen(controlPlane: PluginControlPlaneFacade, onBack: () -> Unit) {
     val state = rememberSelfModulePresentation(controlPlane)
     val context = LocalContext.current
-    var recovery by remember { mutableStateOf(false) }
     var consent by remember { mutableStateOf<ModuleConsent?>(null) }
     var packagePick by remember { mutableStateOf<ModuleDocumentPick?>(null) }
     var exportPick by remember { mutableStateOf<ModuleDocumentPick?>(null) }
@@ -167,11 +166,10 @@ internal fun SelfModuleScreen(controlPlane: PluginControlPlaneFacade, onBack: ()
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             TextButton(onClick = onBack) { Text("返回总控台") }
-            TextButton(onClick = { recovery = !recovery }) { Text(if (recovery) "返回模块界面" else "宿主恢复") }
         }
         state.error?.let { Text(it, Modifier.padding(12.dp), color = MaterialTheme.colorScheme.error) }
         val document = state.document
-        if (recovery || document == null || state.renderError != null) {
+        if (document == null || state.renderError != null) {
             state.renderError?.let { Text(it, Modifier.padding(12.dp)) }
             if (state.status.optJSONObject("module") != null && document == null && state.renderError == null)
                 Text("正在加载模块界面…", Modifier.padding(12.dp))

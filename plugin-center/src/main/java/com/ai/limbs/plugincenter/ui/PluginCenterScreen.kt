@@ -851,32 +851,31 @@ private fun PluginCenterHome(
                             Icon(Icons.Default.Settings, contentDescription = "管理员安全与开发设置")
                         }
                     }
+                    ConsoleOverview(
+                        total = snapshots.size,
+                        running = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GREEN },
+                        attention = snapshots.count { pluginStatusLight(it) == PluginStatusLight.YELLOW },
+                        failed = snapshots.count { pluginStatusLight(it) == PluginStatusLight.RED },
+                        disabled = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GRAY }
+                    )
                     BoxWithConstraints(Modifier.fillMaxWidth()) {
                         val wide = maxWidth >= 400.dp * LocalDensity.current.fontScale
-                        @Composable fun InventoryControls() {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                ConsoleOverview(
-                                    total = snapshots.size,
-                                    running = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GREEN },
-                                    attention = snapshots.count { pluginStatusLight(it) == PluginStatusLight.YELLOW },
-                                    failed = snapshots.count { pluginStatusLight(it) == PluginStatusLight.RED },
-                                    disabled = snapshots.count { pluginStatusLight(it) == PluginStatusLight.GRAY }
-                                )
-                                Button(onClick = onChoose, enabled = !busy) {
-                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                                    Spacer(Modifier.size(6.dp))
-                                    Text("添加插件")
-                                }
+                        @Composable fun AddPluginControl() {
+                            Button(onClick = onChoose, enabled = !busy) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.size(6.dp))
+                                Text("添加插件")
                             }
                         }
                         if (wide) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Box(Modifier.weight(1f)) { InventoryControls() }
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically) {
+                                AddPluginControl()
                                 SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule)
                             }
                         } else {
                             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                InventoryControls()
+                                AddPluginControl()
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                     SelfModuleSummary(selfPresentation, !busy, onOpenSelfModule)
                                 }
