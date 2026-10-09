@@ -50,7 +50,15 @@ internal fun SelfModuleRecovery(controlPlane: PluginControlPlaneFacade, status: 
         }
     }
     fun operate(operation: String, parameters: JSONObject) {
-        val continuation = operation == "migrate" && (if (parameters.has("migration_id")) status.optJSONArray("outgoing_migrations")?.let { array -> (0 until array.length()).map { array.getJSONObject(it) }.firstOrNull { it.getString("migration_id") == parameters.getString("migration_id") } else module)?.optBoolean("human_migration_authorized") == true &&
+        // Retired transfers retain their own authority; do not use a newly installed module's grant.
+        val transfer = if (parameters.has("migration_id")) {
+            status.optJSONArray("outgoing_migrations")?.let { array ->
+                (0 until array.length()).map { array.getJSONObject(it) }
+                    .firstOrNull { it.getString("migration_id") == parameters.getString("migration_id") }
+            }
+        } else module
+        val continuation = operation == "migrate" &&
+            transfer?.optBoolean("human_migration_authorized") == true &&
             parameters.optString("phase") in setOf("commit", "activate", "cancel", "discard")
         if (authorized(operation) || continuation) perform("self_execute", JSONObject().put("operation", operation).put("parameters", parameters))
         else perform("self_submit", JSONObject().put("mode", "ONE_TIME").put("reason", reason.trim())

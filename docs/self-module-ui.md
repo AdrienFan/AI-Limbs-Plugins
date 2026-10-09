@@ -59,3 +59,11 @@ Only Plugin Center changes: version 1.3.50 (code 54). Base build116 and self mod
 ## 1.3.51 / module 0.1.4
 
 Native choose_export supplies a persisted SAF document token before migration approval. Host staging is exported and read back for SHA-256 verification. The module owns the endpoint form and upload action; Plugin Center supplies bounded HTTPS transport and native confirmation. Only a matching receiver acknowledgment triggers controlled source-slot retirement. Recovery continues the signed transfer from outgoing_migrations after uninstall. Endpoint tokens remain transient. The receiver database is outside scope. Existing offline WebView restrictions and authority checks remain unchanged. Cloud transport regressions use fake connections, never real self-module data.
+
+## 1.3.52 migration recovery compiler correction
+
+Run 37935146946 failed production Kotlin compilation because the inline retained-transfer
+lookup had an unclosed let block. Express the lookup as a separate local value and
+check the same transfer authority and continuation phases. This removes the parser
+error and its cascading Compose diagnostics without changing authorization rules.
+Center 1.3.52 (code 56) cloud build and emulator validation are pending.
